@@ -322,8 +322,16 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 
 func (c *ClusterGatewayInstaller) copySecretForManagedServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, config *proxyv1alpha1.ClusterGatewayConfiguration, clusterName string) error {
 	endpointType := clusterv1alpha1.ClusterEndpointTypeConst
-	if config.Spec.Egress.Type == proxyv1alpha1.EgressTypeClusterProxy {
-		endpointType = clusterv1alpha1.ClusterEndpointTypeClusterProxy
+
+	var proxyAddon addonv1alpha1.ManagedClusterAddOn
+	err := c.client.Get(context.TODO(), types.NamespacedName{Name: "cluster-proxy", Namespace: clusterName}, &proxyAddon)
+	if err == nil {
+		for _, cond := range proxyAddon.Status.Conditions {
+			if cond.Type == "Available" && cond.Status == metav1.ConditionTrue {
+				endpointType = clusterv1alpha1.ClusterEndpointTypeClusterProxy
+				break
+			}
+		}
 	}
 	gatewaySecretNamespace := config.Spec.SecretNamespace
 	secretName := config.Spec.SecretManagement.ManagedServiceAccount.Name
