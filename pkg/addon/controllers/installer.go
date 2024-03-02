@@ -44,14 +44,23 @@ var (
 )
 var _ reconcile.Reconciler = &ClusterGatewayInstaller{}
 
-func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, caPair *crypto.CA, nativeClient kubernetes.Interface, secretLister corev1lister.SecretLister) error {
+func SetupClusterGatewayInstallerWithManager(
+	mgr ctrl.Manager,
+	caPair *crypto.CA,
+	hostClient client.Client,
+	nativeClient kubernetes.Interface,
+	secretLister corev1lister.SecretLister,
+	mcMode bool,
+) error {
 	installer := &ClusterGatewayInstaller{
+		HostClient:   hostClient,
 		nativeClient: nativeClient,
 		caPair:       caPair,
 		secretLister: secretLister,
 		cache:        mgr.GetCache(),
 		client:       mgr.GetClient(),
 		mapper:       mgr.GetRESTMapper(),
+		mcMode:       mcMode,
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		// Watches ClusterManagementAddOn singleton
@@ -76,12 +85,14 @@ func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, caPair *crypto.CA
 }
 
 type ClusterGatewayInstaller struct {
+	HostClient   client.Client
 	nativeClient kubernetes.Interface
 	secretLister corev1lister.SecretLister
 	caPair       *crypto.CA
 	client       client.Client
 	cache        cache.Cache
 	mapper       meta.RESTMapper
+	mcMode       bool
 }
 
 const (
@@ -166,8 +177,36 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		newAPFClusterRoleBinding(addon, namespace),
 		newAPIService(addon, namespace, caCertData),
 	}
+	if c.mcMode {
+		var manager appsv1.Deployment
+		key := client.ObjectKey{
+			Name:      "cluster-gateway-addon-manager",
+			Namespace: "open-cluster-management-addon",
+		}
+		if err := c.HostClient.Get(context.Background(), key, &manager); err == nil {
+			ownerRef := metav1.NewControllerRef(&manager, schema.GroupVersionKind{
+				Group:   "apps",
+				Version: "v1",
+				Kind:    "Deployment",
+			})
+			for i, target := range targets {
+				target.SetOwnerReferences([]metav1.OwnerReference{
+					*ownerRef,
+				})
+				targets[i] = target
+			}
+		}
+	} else {
+		for i, target := range targets {
+			target.SetOwnerReferences([]metav1.OwnerReference{
+				newOwnerReference(addon),
+			})
+			targets[i] = target
+		}
+	}
+
 	for _, obj := range targets {
-		if err := c.client.Create(context.TODO(), obj); err != nil {
+		if err := c.HostClient.Create(context.TODO(), obj); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
 				return reconcile.Result{}, errors.Wrapf(err, "failed deploying cluster-gateway")
 			}
@@ -211,14 +250,14 @@ func (c *ClusterGatewayInstaller) ensureAPIService(addon *addonv1alpha1.ClusterM
 	}
 	expected := newAPIService(addon, namespace, caCertData)
 	current := &apiregistrationv1.APIService{}
-	if err := c.client.Get(context.TODO(), types.NamespacedName{
+	if err := c.HostClient.Get(context.TODO(), types.NamespacedName{
 		Name: expected.Name,
 	}, current); err != nil {
 		return err
 	}
 	if !bytes.Equal(caCertData, current.Spec.CABundle) {
 		expected.ResourceVersion = current.ResourceVersion
-		if err := c.client.Update(context.TODO(), expected); err != nil {
+		if err := c.HostClient.Update(context.TODO(), expected); err != nil {
 			return err
 		}
 	}
@@ -227,13 +266,13 @@ func (c *ClusterGatewayInstaller) ensureAPIService(addon *addonv1alpha1.ClusterM
 
 func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *proxyv1alpha1.ClusterGatewayConfiguration) error {
 	currentClusterGateway := &appsv1.Deployment{}
-	if err := c.client.Get(context.TODO(), types.NamespacedName{
+	if err := c.HostClient.Get(context.TODO(), types.NamespacedName{
 		Namespace: config.Spec.InstallNamespace,
 		Name:      "gateway-deployment",
 	}, currentClusterGateway); err != nil {
 		if apierrors.IsNotFound(err) {
 			clusterGateway := newClusterGatewayDeployment(addon, config)
-			if err := c.client.Create(context.TODO(), clusterGateway); err != nil {
+			if err := c.HostClient.Create(context.TODO(), clusterGateway); err != nil {
 				return err
 			}
 			return nil
@@ -253,7 +292,7 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 
 	clusterGateway := newClusterGatewayDeployment(addon, config)
 	clusterGateway.ResourceVersion = currentClusterGateway.ResourceVersion
-	if err := c.client.Update(context.TODO(), clusterGateway); err != nil {
+	if err := c.HostClient.Update(context.TODO(), clusterGateway); err != nil {
 		return err
 	}
 	return nil
@@ -396,15 +435,24 @@ func newServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, namespace st
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
 			Name:      common.AddonName,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
+	}
+}
+
+func newOwnerReference(addon *addonv1alpha1.ClusterManagementAddOn) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: addonv1alpha1.GroupVersion.String(),
+		Kind:       "ClusterManagementAddOn",
+		UID:        addon.UID,
+		Name:       addon.Name,
 	}
 }
 
@@ -555,14 +603,14 @@ func newClusterGatewayService(addon *addonv1alpha1.ClusterManagementAddOn, names
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
 			Name:      common.AddonName,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		Spec: corev1.ServiceSpec{
 			Type: corev1.ServiceTypeClusterIP,
@@ -583,14 +631,14 @@ func newAPIService(addon *addonv1alpha1.ClusterManagementAddOn, namespace string
 	return &apiregistrationv1.APIService{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "v1alpha1.cluster.core.oam.dev",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		Spec: apiregistrationv1.APIServiceSpec{
 			Group:   "cluster.core.oam.dev",
@@ -612,14 +660,14 @@ func newAuthenticationRole(addon *addonv1alpha1.ClusterManagementAddOn, namespac
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "kube-system",
 			Name:      "extension-apiserver-authentication-reader:cluster-gateway",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		RoleRef: rbacv1.RoleRef{
 			Kind: "Role",
@@ -640,14 +688,14 @@ func newSecretRole(addon *addonv1alpha1.ClusterManagementAddOn, secretNamespace 
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: secretNamespace,
 			Name:      "cluster-gateway",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -664,14 +712,14 @@ func newSecretRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: secretNamespace,
 			Name:      "cluster-gateway",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		RoleRef: rbacv1.RoleRef{
 			Kind: "Role",
@@ -690,14 +738,14 @@ func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "apiserver-aggregation:cluster-gateway",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -733,14 +781,14 @@ func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, names
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "apiserver-aggregation:cluster-gateway",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
+			//OwnerReferences: []metav1.OwnerReference{
+			//	{
+			//		APIVersion: addonv1alpha1.GroupVersion.String(),
+			//		Kind:       "ClusterManagementAddOn",
+			//		UID:        addon.UID,
+			//		Name:       addon.Name,
+			//	},
+			//},
 		},
 		RoleRef: rbacv1.RoleRef{
 			Kind: "ClusterRole",

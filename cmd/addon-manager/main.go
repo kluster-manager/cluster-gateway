@@ -13,7 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	nativescheme "k8s.io/client-go/kubernetes/scheme"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
@@ -21,6 +23,8 @@ import (
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 var (
@@ -31,7 +35,7 @@ var (
 func init() {
 	addonv1alpha1.AddToScheme(scheme)
 	proxyv1alpha1.AddToScheme(scheme)
-	nativescheme.AddToScheme(scheme)
+	clientgoscheme.AddToScheme(scheme)
 	apiregistrationv1.AddToScheme(scheme)
 	ocmauthv1beta1.AddToScheme(scheme)
 }
@@ -41,6 +45,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var signerSecretName string
+	var mcKubeconfig string
 
 	logger := klogr.New()
 	klog.SetOutput(os.Stdout)
@@ -52,11 +57,28 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&signerSecretName, "signer-secret-name", "cluster-gateway-signer",
 		"The name of the secret to store the signer CA")
+	flag.StringVar(&mcKubeconfig, "multicluster-kubeconfig", "",
+		"The path to multicluster-controlplane kubeconfig")
 
 	flag.Parse()
 	ctrl.SetLogger(logger)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	var mcConfig, hostConfig *rest.Config
+
+	if mcKubeconfig != "" {
+		var err error
+		mcConfig, err = clientcmd.BuildConfigFromFlags("", mcKubeconfig)
+		if err != nil {
+			setupLog.Error(err, "unable to build multicluster rest config")
+			os.Exit(1)
+		}
+		hostConfig = ctrl.GetConfigOrDie()
+	} else {
+		hostConfig = ctrl.GetConfigOrDie()
+		mcConfig = hostConfig
+	}
+
+	mgr, err := ctrl.NewManager(mcConfig, ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,
@@ -78,21 +100,30 @@ func main() {
 		currentNamespace = inClusterNamespace
 	}
 
-	caPair, err := cert.EnsureCAPair(mgr.GetConfig(), currentNamespace, signerSecretName)
+	caPair, err := cert.EnsureCAPair(hostConfig, currentNamespace, signerSecretName)
 	if err != nil {
 		setupLog.Error(err, "unable to ensure ca signer")
 	}
-	nativeClient, err := kubernetes.NewForConfig(mgr.GetConfig())
+	hostClient, err := kubernetes.NewForConfig(hostConfig)
 	if err != nil {
-		setupLog.Error(err, "unable to instantiate legacy client")
+		setupLog.Error(err, "unable to set up host kubernetes native client")
 		os.Exit(1)
 	}
-	informerFactory := informers.NewSharedInformerFactory(nativeClient, 0)
+
+	hostKubeClient, err := newHostClient(hostConfig)
+	if err != nil {
+		setupLog.Error(err, "failed create host KubeClient")
+		os.Exit(1)
+	}
+
+	hostInformerFactory := informers.NewSharedInformerFactory(hostClient, 0)
 	if err := controllers.SetupClusterGatewayInstallerWithManager(
 		mgr,
 		caPair,
-		nativeClient,
-		informerFactory.Core().V1().Secrets().Lister()); err != nil {
+		hostKubeClient,
+		hostClient,
+		hostInformerFactory.Core().V1().Secrets().Lister(),
+		mcKubeconfig != ""); err != nil {
 		setupLog.Error(err, "unable to setup installer")
 		os.Exit(1)
 	}
@@ -102,7 +133,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	go informerFactory.Start(ctx.Done())
+	go hostInformerFactory.Start(ctx.Done())
 
 	addonManager, err := addonmanager.New(mgr.GetConfig())
 	if err != nil {
@@ -125,4 +156,19 @@ func main() {
 		panic(err)
 	}
 
+}
+
+func newHostClient(hostConfig *rest.Config) (client.Client, error) {
+	hc, err := rest.HTTPClientFor(hostConfig)
+	if err != nil {
+		return nil, err
+	}
+	mapper, err := apiutil.NewDynamicRESTMapper(hostConfig, hc)
+	if err != nil {
+		return nil, err
+	}
+	return client.New(hostConfig, client.Options{
+		Scheme: clientgoscheme.Scheme,
+		Mapper: mapper,
+	})
 }
