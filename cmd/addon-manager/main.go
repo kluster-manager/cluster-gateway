@@ -19,7 +19,7 @@ import (
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"open-cluster-management.io/addon-framework/pkg/addonmanager"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
-	ocmauthv1alpha1 "open-cluster-management.io/managed-serviceaccount/api/v1alpha1"
+	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -33,7 +33,7 @@ func init() {
 	proxyv1alpha1.AddToScheme(scheme)
 	nativescheme.AddToScheme(scheme)
 	apiregistrationv1.AddToScheme(scheme)
-	ocmauthv1alpha1.AddToScheme(scheme)
+	ocmauthv1beta1.AddToScheme(scheme)
 }
 
 func main() {

@@ -25,7 +25,7 @@ import (
 	"k8s.io/utils/pointer"
 	"open-cluster-management.io/addon-framework/pkg/certrotation"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
-	ocmauthv1alpha1 "open-cluster-management.io/managed-serviceaccount/api/v1alpha1"
+	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -285,8 +285,8 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 		return nil
 	}
 	if _, err := c.mapper.KindFor(schema.GroupVersionResource{
-		Group:    ocmauthv1alpha1.GroupVersion.Group,
-		Version:  ocmauthv1alpha1.GroupVersion.Version,
+		Group:    ocmauthv1beta1.GroupVersion.Group,
+		Version:  ocmauthv1beta1.GroupVersion.Version,
 		Resource: "managedserviceaccounts",
 	}); err != nil {
 		return fmt.Errorf("failed to discover ManagedServiceAccount resource in the cluster")
@@ -756,8 +756,8 @@ func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, names
 	}
 }
 
-func buildManagedServiceAccount(addon *addonv1alpha1.ManagedClusterAddOn) *ocmauthv1alpha1.ManagedServiceAccount {
-	return &ocmauthv1alpha1.ManagedServiceAccount{
+func buildManagedServiceAccount(addon *addonv1alpha1.ManagedClusterAddOn) *ocmauthv1beta1.ManagedServiceAccount {
+	return &ocmauthv1beta1.ManagedServiceAccount{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "authentication.open-cluster-management.io/v1alpha1",
 			Kind:       "ManagedServiceAccount",
@@ -774,8 +774,8 @@ func buildManagedServiceAccount(addon *addonv1alpha1.ManagedClusterAddOn) *ocmau
 				},
 			},
 		},
-		Spec: ocmauthv1alpha1.ManagedServiceAccountSpec{
-			Rotation: ocmauthv1alpha1.ManagedServiceAccountRotation{
+		Spec: ocmauthv1beta1.ManagedServiceAccountSpec{
+			Rotation: ocmauthv1beta1.ManagedServiceAccountRotation{
 				Enabled: true,
 				Validity: metav1.Duration{
 					Duration: time.Hour * 24 * 180,
