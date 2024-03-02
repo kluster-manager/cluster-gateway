@@ -1,6 +1,7 @@
 
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+IMAGE_REGISTRY_NAME ?= oamdev
 IMG_TAG ?= latest
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:crdVersions={v1},allowDangerousTypes=true,generateEmbeddedObjectMeta=true"
@@ -118,14 +119,14 @@ manifests: controller-gen
 		output:crd:artifacts:config=hack/crd/bases
 
 gateway:
-	docker build -t oamdev/cluster-gateway:${IMG_TAG} \
+	docker build -t $(IMAGE_REGISTRY_NAME)/cluster-gateway:${IMG_TAG} \
 		--build-arg OS=${OS} \
 		--build-arg ARCH=${ARCH} \
 		-f cmd/apiserver/Dockerfile \
 		.
 
 ocm-addon-manager:
-	docker build -t oamdev/cluster-gateway-addon-manager:${IMG_TAG} \
+	docker build -t $(IMAGE_REGISTRY_NAME)/cluster-gateway-addon-manager:${IMG_TAG} \
 		--build-arg OS=${OS} \
 		--build-arg ARCH=${ARCH} \
 		-f cmd/addon-manager/Dockerfile \

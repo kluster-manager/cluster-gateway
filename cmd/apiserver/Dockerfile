@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.20-alpine as builder
+FROM golang:1.22 as builder
 ARG OS
 ARG ARCH
 
@@ -36,7 +36,7 @@ RUN CGO_ENABLED=0 \
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM alpine:3
+FROM gcr.io/distroless/base-debian12
 
 WORKDIR /
 COPY --from=builder /workspace/apiserver /
