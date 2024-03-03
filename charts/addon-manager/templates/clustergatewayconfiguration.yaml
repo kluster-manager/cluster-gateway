@@ -1,4 +1,4 @@
-apiVersion: proxy.open-cluster-management.io/v1alpha1
+apiVersion: config.gateway.open-cluster-management.io/v1alpha1
 kind: ClusterGatewayConfiguration
 metadata:
   name: cluster-gateway

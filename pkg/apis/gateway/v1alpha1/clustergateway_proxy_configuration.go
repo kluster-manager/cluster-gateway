@@ -27,11 +27,11 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/strings/slices"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
 const (
-	AnnotationClusterGatewayProxyConfiguration = "cluster.core.oam.dev/cluster-gateway-proxy-configuration"
+	AnnotationClusterGatewayProxyConfiguration = "gateway.open-cluster-management.io/cluster-gateway-proxy-configuration"
 )
 
 type ClusterGatewayProxyConfiguration struct {

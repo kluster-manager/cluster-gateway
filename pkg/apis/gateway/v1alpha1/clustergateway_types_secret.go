@@ -9,11 +9,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/pointer"
 
-	"github.com/oam-dev/cluster-gateway/pkg/common"
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/featuregates"
-	"github.com/oam-dev/cluster-gateway/pkg/options"
-	"github.com/oam-dev/cluster-gateway/pkg/util/singleton"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/options"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
@@ -39,8 +39,8 @@ var _ rest.Lister = &ClusterGateway{}
 // NOTE: Because the secret resource is designed to have no "metadata.generation" field,
 // the ClusterGateway resource also misses the generation tracking.
 const (
-	AnnotationKeyClusterGatewayStatusHealthy       = "status.cluster.core.oam.dev/healthy"
-	AnnotationKeyClusterGatewayStatusHealthyReason = "status.cluster.core.oam.dev/healthy-reason"
+	AnnotationKeyClusterGatewayStatusHealthy       = "status.gateway.open-cluster-management.io/healthy"
+	AnnotationKeyClusterGatewayStatusHealthyReason = "status.gateway.open-cluster-management.io/healthy-reason"
 )
 
 func (in *ClusterGateway) Get(ctx context.Context, name string, _ *metav1.GetOptions) (runtime.Object, error) {

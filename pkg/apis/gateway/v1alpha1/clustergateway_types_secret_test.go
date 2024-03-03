@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/oam-dev/cluster-gateway/pkg/common"
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/featuregates"
-	"github.com/oam-dev/cluster-gateway/pkg/options"
-	"github.com/oam-dev/cluster-gateway/pkg/util/cert"
-	"github.com/oam-dev/cluster-gateway/pkg/util/singleton"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/options"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

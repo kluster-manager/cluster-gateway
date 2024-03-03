@@ -13,11 +13,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	multicluster "github.com/oam-dev/cluster-gateway/pkg/apis/cluster/transport"
-	"github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
-	"github.com/oam-dev/cluster-gateway/pkg/common"
-	"github.com/oam-dev/cluster-gateway/pkg/event"
-	"github.com/oam-dev/cluster-gateway/pkg/generated/clientset/versioned"
+	multicluster "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/transport"
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/event"
+	"github.com/kluster-manager/cluster-gateway/pkg/generated/clientset/versioned"
 )
 
 var (
@@ -59,7 +59,7 @@ func (c *ClusterGatewayHealthProber) Reconcile(ctx context.Context, request reco
 		return reconcile.Result{}, nil
 	}
 	clusterName := request.Namespace
-	gw, err := c.gatewayClient.ClusterV1alpha1().
+	gw, err := c.gatewayClient.GatewayV1alpha1().
 		ClusterGateways().
 		GetHealthiness(ctx, clusterName, metav1.GetOptions{})
 	if err != nil {
@@ -83,7 +83,7 @@ func (c *ClusterGatewayHealthProber) Reconcile(ctx context.Context, request reco
 		gw.Status.Healthy = healthy
 		if !healthy {
 			if healthErr != nil {
-				gw.Status.HealthyReason = v1alpha1.HealthyReasonType(healthErr.Error())
+				gw.Status.HealthyReason = gatewayv1alpha1.HealthyReasonType(healthErr.Error())
 			}
 		} else {
 			gw.Status.HealthyReason = ""
@@ -91,7 +91,7 @@ func (c *ClusterGatewayHealthProber) Reconcile(ctx context.Context, request reco
 		healthLog.Info("Updating cluster healthiness",
 			"cluster", clusterName,
 			"healthy", healthy)
-		_, err = c.gatewayClient.ClusterV1alpha1().
+		_, err = c.gatewayClient.GatewayV1alpha1().
 			ClusterGateways().
 			UpdateHealthiness(ctx, gw, metav1.UpdateOptions{})
 		if err != nil {

@@ -19,9 +19,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
-	"github.com/oam-dev/cluster-gateway/pkg/generated/clientset/versioned/scheme"
-	contextutil "github.com/oam-dev/cluster-gateway/pkg/util/context"
+	"github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/generated/clientset/versioned/scheme"
+	contextutil "github.com/kluster-manager/cluster-gateway/pkg/util/context"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"

@@ -25,15 +25,15 @@ import (
 
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/metrics"
-	"github.com/oam-dev/cluster-gateway/pkg/options"
-	"github.com/oam-dev/cluster-gateway/pkg/util/singleton"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/metrics"
+	"github.com/kluster-manager/cluster-gateway/pkg/options"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
 	// +kubebuilder:scaffold:resource-imports
-	clusterv1alpha1 "github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
 
-	_ "github.com/oam-dev/cluster-gateway/pkg/featuregates"
+	_ "github.com/kluster-manager/cluster-gateway/pkg/featuregates"
 )
 
 func main() {
@@ -43,8 +43,8 @@ func main() {
 
 	cmd, err := builder.APIServer.
 		// +kubebuilder:scaffold:resource-register
-		WithResource(&clusterv1alpha1.ClusterGateway{}).
-		WithResource(&clusterv1alpha1.VirtualCluster{}).
+		WithResource(&gatewayv1alpha1.ClusterGateway{}).
+		WithResource(&gatewayv1alpha1.VirtualCluster{}).
 		WithLocalDebugExtension().
 		ExposeLoopbackMasterClientConfig().
 		ExposeLoopbackAuthorizer().
@@ -65,13 +65,13 @@ func main() {
 			if err := config.ValidateClusterProxy(); err != nil {
 				klog.Fatal(err)
 			}
-			if err := clusterv1alpha1.LoadGlobalClusterGatewayProxyConfig(); err != nil {
+			if err := gatewayv1alpha1.LoadGlobalClusterGatewayProxyConfig(); err != nil {
 				klog.Fatal(err)
 			}
 			return options
 		}).
 		WithServerFns(func(server *builder.GenericAPIServer) *builder.GenericAPIServer {
-			server.Handler.FullHandlerChain = clusterv1alpha1.NewClusterGatewayProxyRequestEscaper(server.Handler.FullHandlerChain)
+			server.Handler.FullHandlerChain = gatewayv1alpha1.NewClusterGatewayProxyRequestEscaper(server.Handler.FullHandlerChain)
 			return server
 		}).
 		WithPostStartHook("init-master-loopback-client", singleton.InitLoopbackClient).

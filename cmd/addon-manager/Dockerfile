@@ -1,7 +1,7 @@
 ARG OS=linux
 ARG ARCH=amd64
 # Build the manager binary
-FROM golang:1.20 as builder
+FROM golang:1.22 as builder
 ARG OS
 ARG ARCH
 
@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 \
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 ARG ARCH
-FROM multiarch/alpine:${ARCH}-v3.13
+FROM gcr.io/distroless/base-debian12
 
 WORKDIR /
 COPY --from=builder /workspace/addon-manager /

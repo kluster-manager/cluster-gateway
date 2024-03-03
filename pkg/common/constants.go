@@ -1,17 +1,17 @@
 package common
 
-import "github.com/oam-dev/cluster-gateway/pkg/config"
+import "github.com/kluster-manager/cluster-gateway/pkg/config"
 
 const (
 	AddonName = "cluster-gateway"
 )
 
 const (
-	LabelKeyOpenClusterManagementAddon = "proxy.open-cluster-management.io/addon-name"
+	LabelKeyOpenClusterManagementAddon = "config.gateway.open-cluster-management.io/addon-name"
 )
 
 const (
-	ClusterGatewayConfigurationCRDName = "clustergatewayconfigurations.proxy.open-cluster-management.io"
+	ClusterGatewayConfigurationCRDName = "clustergatewayconfigurations.config.gateway.open-cluster-management.io"
 	ClusterGatewayConfigurationCRName  = "cluster-gateway"
 )
 
@@ -20,7 +20,7 @@ const (
 )
 
 const (
-	ClusterGatewayAPIServiceName = "v1alpha1.cluster.core.oam.dev"
+	ClusterGatewayAPIServiceName = "v1alpha1.gateway.open-cluster-management.io"
 )
 
 var (

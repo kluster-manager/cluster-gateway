@@ -1,9 +1,9 @@
 
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+IMAGE_REGISTRY_NAME ?= ghcr.io/kluster-manager
 IMG_TAG ?= latest
-# Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
-CRD_OPTIONS ?= "crd:trivialVersions=true"
+CRD_OPTIONS ?= "crd:crdVersions={v1},allowDangerousTypes=true,generateEmbeddedObjectMeta=true"
 
 OS?=linux
 ARCH?=amd64
@@ -76,7 +76,7 @@ ifeq (, $(shell which controller-gen))
 	CONTROLLER_GEN_TMP_DIR=$$(mktemp -d) ;\
 	cd $$CONTROLLER_GEN_TMP_DIR ;\
 	go mod init tmp ;\
-	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.3.0 ;\
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0 ;\
 	rm -rf $$CONTROLLER_GEN_TMP_DIR ;\
 	}
 CONTROLLER_GEN=$(GOBIN)/controller-gen
@@ -100,32 +100,33 @@ KUSTOMIZE=$(shell which kustomize)
 endif
 
 client-gen:
-	go install k8s.io/code-generator/cmd/client-gen@v0.21.2
+	go install sigs.k8s.io/apiserver-runtime/tools/apiserver-runtime-gen@v1.1.1
 	apiserver-runtime-gen \
- 	--module github.com/oam-dev/cluster-gateway \
- 	-g client-gen \
- 	--versions=github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1 \
- 	--install-generators=false
-
+	--module github.com/kluster-manager/cluster-gateway \
+	-g client-gen \
+	--versions=github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1 \
+	--install-generators=false
+	rm -rf pkg/generated/clientset/versioned/typed/gateway/v1alpha1/fake
+	rm -rf pkg/generated/clientset/versioned/fake
 
 generate: controller-gen
-	${CONTROLLER_GEN} object:headerFile="hack/boilerplate.go.txt" paths="./pkg/apis/proxy/..."
+	${CONTROLLER_GEN} object:headerFile="hack/boilerplate.go.txt" paths="./pkg/apis/config/..."
 
 manifests: controller-gen
 	${CONTROLLER_GEN} $(CRD_OPTIONS) \
-		paths="./pkg/apis/proxy/..." \
+		paths="./pkg/apis/config/..." \
 		rbac:roleName=manager-role \
 		output:crd:artifacts:config=hack/crd/bases
 
 gateway:
-	docker build -t oamdev/cluster-gateway:${IMG_TAG} \
+	docker build -t $(IMAGE_REGISTRY_NAME)/cluster-gateway:${IMG_TAG} \
 		--build-arg OS=${OS} \
 		--build-arg ARCH=${ARCH} \
 		-f cmd/apiserver/Dockerfile \
 		.
 
 ocm-addon-manager:
-	docker build -t oamdev/cluster-gateway-addon-manager:${IMG_TAG} \
+	docker build -t $(IMAGE_REGISTRY_NAME)/cluster-gateway-addon-manager:${IMG_TAG} \
 		--build-arg OS=${OS} \
 		--build-arg ARCH=${ARCH} \
 		-f cmd/addon-manager/Dockerfile \

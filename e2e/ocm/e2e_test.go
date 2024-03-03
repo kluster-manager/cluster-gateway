@@ -7,7 +7,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/oam-dev/cluster-gateway/e2e/framework"
+	"github.com/kluster-manager/cluster-gateway/e2e/framework"
 )
 
 func TestMain(m *testing.M) {

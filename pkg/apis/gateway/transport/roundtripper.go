@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
 var _ http.RoundTripper = &clusterGatewayRoundTripper{}

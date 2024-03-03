@@ -17,7 +17,7 @@ import (
 	konnectivity "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
 var DialerGetter = func(ctx context.Context) (k8snet.DialFunc, error) {

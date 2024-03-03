@@ -18,13 +18,13 @@ rules:
     verbs:
       - "*"
   - apiGroups:
-      - proxy.open-cluster-management.io
+      - config.gateway.open-cluster-management.io
     resources:
       - clustergatewayconfigurations
     verbs:
       - "*"
   - apiGroups:
-      - cluster.core.oam.dev
+      - gateway.open-cluster-management.io
     resources:
       - clustergateways/health
       - clustergateways/proxy

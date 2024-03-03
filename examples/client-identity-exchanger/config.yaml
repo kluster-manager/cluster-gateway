@@ -1,4 +1,4 @@
-apiVersion: cluster.core.oam.dev/v1alpha1
+apiVersion: gateway.open-cluster-management.io/v1alpha1
 kind: ClusterGatewayProxyConfiguration
 spec:
   clientIdentityExchanger:

@@ -1,4 +1,4 @@
-module github.com/oam-dev/cluster-gateway
+module github.com/kluster-manager/cluster-gateway
 
 go 1.20
 
@@ -28,7 +28,6 @@ require (
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.1.2
 	sigs.k8s.io/apiserver-runtime v1.1.2-0.20221102045245-fb656940062f
 	sigs.k8s.io/controller-runtime v0.15.1
-	sigs.k8s.io/controller-tools v0.11.3
 )
 
 require (

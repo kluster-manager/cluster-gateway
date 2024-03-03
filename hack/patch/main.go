@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	"github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
 )
 
 const (
@@ -87,7 +87,7 @@ func main() {
 			return nil
 		},
 	}
-	gv := v1alpha1.SchemeGroupVersion
+	gv := gatewayv1alpha1.SchemeGroupVersion
 	apiServiceName := gv.Version + "." + gv.Group
 	cmd.Flags().StringVar(&APIServiceName, FlagAPIServiceName, apiServiceName, "specify the target APIService to patch caBundle")
 	cmd.Flags().StringVar(&secretName, FlagSecretName, "", "specify the source secret name")

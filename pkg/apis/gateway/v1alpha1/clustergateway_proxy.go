@@ -31,9 +31,9 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/strings/slices"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/featuregates"
-	"github.com/oam-dev/cluster-gateway/pkg/metrics"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/metrics"
 
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

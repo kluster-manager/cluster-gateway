@@ -63,13 +63,13 @@ spec:
 apiVersion: apiregistration.k8s.io/v1
 kind: APIService
 metadata:
-  name: v1alpha1.cluster.core.oam.dev
+  name: v1alpha1.gateway.open-cluster-management.io
   labels:
     api: cluster-extension-apiserver
     apiserver: "true"
 spec:
   version: v1alpha1
-  group: cluster.core.oam.dev
+  group: gateway.open-cluster-management.io
   groupPriorityMinimum: 2000
   service:
     name: gateway-service
@@ -142,7 +142,7 @@ kind: Secret
 metadata:
   name: managed1
   labels:
-    cluster.core.oam.dev/cluster-credential-type: X509
+    gateway.open-cluster-management.io/cluster-credential-type: X509
 type: Opaque # <--- Has to be opaque
 data:
   endpoint: "..." # Should NOT be 127.0.0.1
@@ -159,7 +159,7 @@ kind: Secret
 metadata:
   name: managed1
   labels:
-    cluster.core.oam.dev/cluster-credential-type: ServiceAccountToken
+    gateway.open-cluster-management.io/cluster-credential-type: ServiceAccountToken
 type: Opaque # <--- Has to be opaque
 data:
   endpoint: "..." # ditto
@@ -171,14 +171,14 @@ data:
 
 ```shell
 $ KUBECONFIG=/tmp/hub.kubeconfig kubectl get \
-      --raw="/apis/cluster.core.oam.dev/v1alpha1/clustergateways/managed1/proxy/healthz"
+      --raw="/apis/gateway.open-cluster-management.io/v1alpha1/clustergateways/managed1/proxy/healthz"
 ```
 
 4. Craft a dedicated kubeconfig for proxying `managed1` from `hub` cluster:
 
 ```shell
 $ cat /tmp/hub.kubeconfig \
-    | sed 's/\(server: .*\)/\1\/apis\/cluster.core.oam.dev\/v1alpha1\/clustergateways\/managed1\/proxy\//' \
+    | sed 's/\(server: .*\)/\1\/apis\/gateway.open-cluster-management.io\/v1alpha1\/clustergateways\/managed1\/proxy\//' \
     > /tmp/hub-managed1.kubeconfig
 ```
 

@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/oam-dev/cluster-gateway/pkg/common"
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/util/singleton"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 )
 
 const (

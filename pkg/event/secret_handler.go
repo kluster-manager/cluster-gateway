@@ -1,7 +1,7 @@
 package event
 
 import (
-	"github.com/oam-dev/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 
 	"context"
 

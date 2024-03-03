@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	multicluster "github.com/oam-dev/cluster-gateway/pkg/apis/cluster/transport"
+	multicluster "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/transport"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
