@@ -47,7 +47,6 @@ type ClusterGatewayConfigurationStatus struct {
 }
 
 type ClusterGatewayTrafficEgress struct {
-	Type         EgressType                               `json:"type"`
 	ClusterProxy *ClusterGatewayTrafficEgressClusterProxy `json:"clusterProxy,omitempty"`
 }
 

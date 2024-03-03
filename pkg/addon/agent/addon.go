@@ -96,7 +96,7 @@ func (c *clusterGatewayAddonManager) GetAgentAddonOptions() agent.AgentAddonOpti
 }
 
 func buildClusterGatewayOutboundPermission(serviceAccountNamespace, serviceAccountName string) []runtime.Object {
-	const clusterRoleName = "open-cluster-management:cluster-gateway:default"
+	const clusterRoleName = "open-cluster-management:cluster-gateway:impersonator"
 	clusterGatewayClusterRole := &rbacv1.ClusterRole{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "rbac.authorization.k8s.io/v1",

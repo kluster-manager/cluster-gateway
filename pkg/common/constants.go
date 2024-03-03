@@ -26,8 +26,8 @@ const (
 const (
 	// LabelKeyClusterCredentialType describes the credential type in object label field
 	LabelKeyClusterCredentialType = config.MetaApiGroupName + "/cluster-credential-type"
-	// LabelKeyClusterEndpointType describes the endpoint type.
-	LabelKeyClusterEndpointType = config.MetaApiGroupName + "/cluster-endpoint-type"
-	// LabelKeyManagedServiceAccount describes the label used by managed service account secret
-	LabelKeyManagedServiceAccount = "authentication.open-cluster-management.io/is-managed-serviceaccount"
+	// LabelKeyIsManagedServiceaccount describes the credential is a manageed service account token
+	LabelKeyIsManagedServiceAccount                = "authentication.open-cluster-management.io/is-managed-serviceaccount"
+	AnnotationKeyClusterGatewayStatusHealthy       = "status.gateway.open-cluster-management.io/healthy"
+	AnnotationKeyClusterGatewayStatusHealthyReason = "status.gateway.open-cluster-management.io/healthy-reason"
 )

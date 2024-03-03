@@ -1,5 +1,5 @@
 apiVersion: v2
-name: cluster-gateway-addon-manager
+name: cluster-gateway-manager
 description: A Helm chart for Cluster-Gateway Addon-Manager
 type: application
 version: 0.1.0

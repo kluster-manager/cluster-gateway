@@ -165,8 +165,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		newServiceAccount(addon, namespace),
 		newClusterGatewayService(addon, namespace),
 		newAuthenticationRole(addon, namespace),
-		newSecretClusterRole(addon),
-		newSecretClusterRoleBinding(addon, namespace),
+		newAuthDelegatorRole(addon, namespace),
 		newAPFClusterRole(addon),
 		newAPFClusterRoleBinding(addon, namespace),
 		newAPIService(addon, namespace, caCertData),
@@ -265,7 +264,7 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 }
 
 func (c *ClusterGatewayInstaller) ensureClusterProxySecrets(config *configv1alpha1.ClusterGatewayConfiguration) error {
-	if config.Spec.Egress.Type != configv1alpha1.EgressTypeClusterProxy {
+	if config.Spec.Egress.ClusterProxy == nil {
 		return nil
 	}
 	proxyClientCASecretName := config.Spec.Egress.ClusterProxy.Credentials.ProxyClientCASecretName
@@ -344,10 +343,9 @@ const labelKeyClusterGatewayConfigurationGeneration = "config.gateway.open-clust
 func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration) *appsv1.Deployment {
 	args := []string{
 		"--secure-port=9443",
-		"--ocm-integration=true",
 		"--tls-cert-file=/etc/server/tls.crt",
 		"--tls-private-key-file=/etc/server/tls.key",
-		"--feature-gates=HealthinessCheck=true,SecretCache=true",
+		"--feature-gates=HealthinessCheck=true,ClientIdentityPenetration=true",
 	}
 	volumes := []corev1.Volume{
 		{
@@ -366,7 +364,7 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 			ReadOnly:  true,
 		},
 	}
-	if config.Spec.Egress.Type == configv1alpha1.EgressTypeClusterProxy {
+	if config.Spec.Egress.ClusterProxy != nil {
 		args = append(args,
 			"--proxy-host="+config.Spec.Egress.ClusterProxy.ProxyServerHost,
 			"--proxy-port="+strconv.Itoa(int(config.Spec.Egress.ClusterProxy.ProxyServerPort)),
@@ -444,7 +442,7 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 						{
 							Name:            "apiserver",
 							Image:           config.Spec.Image,
-							ImagePullPolicy: corev1.PullIfNotPresent,
+							ImagePullPolicy: corev1.PullAlways,
 							Args:            args,
 							VolumeMounts:    volumeMounts,
 							Resources: corev1.ResourceRequirements{
@@ -565,34 +563,10 @@ func newAuthenticationRole(addon *addonv1alpha1.ClusterManagementAddOn, namespac
 	}
 }
 
-func newSecretClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.ClusterRole {
-	return &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cluster-gateway-credential-reader",
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: addonv1alpha1.GroupVersion.String(),
-					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
-				},
-			},
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups:     []string{""},
-				Resources:     []string{"secrets"},
-				Verbs:         []string{"get", "list", "watch", "update"},
-				ResourceNames: []string{common.AddonName},
-			},
-		},
-	}
-}
-
-func newSecretClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
+func newAuthDelegatorRole(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "cluster-gateway-credential-reader",
+			Name: "auth-delegator:cluster-gateway",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
@@ -604,7 +578,7 @@ func newSecretClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, na
 		},
 		RoleRef: rbacv1.RoleRef{
 			Kind: "ClusterRole",
-			Name: "cluster-gateway-credential-reader",
+			Name: "system:auth-delegator",
 		},
 		Subjects: []rbacv1.Subject{
 			{
@@ -615,10 +589,11 @@ func newSecretClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, na
 		},
 	}
 }
+
 func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.ClusterRole {
 	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "apiserver-aggregation:cluster-gateway",
+			Name: "open-cluster-management:cluster-gateway:apiserver",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
@@ -654,6 +629,19 @@ func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 				Resources: []string{"subjectaccessreviews"},
 				Verbs:     []string{"*"},
 			},
+			// read/update managed cluster addons
+			{
+				APIGroups: []string{"addon.open-cluster-management.io"},
+				Resources: []string{"managedclusteraddons"},
+				Verbs:     []string{"get", "list", "watch", "update", "patch"},
+			},
+			// read managed service account credentials
+			{
+				APIGroups:     []string{""},
+				Resources:     []string{"secrets"},
+				Verbs:         []string{"get", "list", "watch"},
+				ResourceNames: []string{common.AddonName},
+			},
 		},
 	}
 }
@@ -661,7 +649,7 @@ func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "apiserver-aggregation:cluster-gateway",
+			Name: "open-cluster-management:cluster-gateway:apiserver",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
@@ -673,7 +661,7 @@ func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, names
 		},
 		RoleRef: rbacv1.RoleRef{
 			Kind: "ClusterRole",
-			Name: "apiserver-aggregation:cluster-gateway",
+			Name: "open-cluster-management:cluster-gateway:apiserver",
 		},
 		Subjects: []rbacv1.Subject{
 			{

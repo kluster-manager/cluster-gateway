@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: open-cluster-management:cluster-gateway:managedcluster-reader
+  name: open-cluster-management:cluster-gateway:apiserver
 rules:
   - apiGroups:
       - cluster.open-cluster-management.io
@@ -43,3 +43,25 @@ rules:
       - subjectaccessreviews
     verbs:
       - "*"
+  # read/update managed cluster addons
+  - apiGroups:
+      - addon.open-cluster-management.io
+    resources:
+      - managedclusteraddons
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+  # read managed service account credentials
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+    resourceNames:
+      - cluster-gateway

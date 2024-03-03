@@ -1,12 +1,27 @@
+# to read the config for terminating authentication
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: system:extension-apiserver-authentication-reader:cluster-gateway
+  name: extension-apiserver-authentication-reader:cluster-gateway
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: cluster-gateway
+    namespace: {{ .Release.Namespace }}
+---
+# to delegate authentication and authorization
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: auth-delegator:cluster-gateway
+roleRef:
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+  name: system:auth-delegator
 subjects:
   - kind: ServiceAccount
     name: cluster-gateway

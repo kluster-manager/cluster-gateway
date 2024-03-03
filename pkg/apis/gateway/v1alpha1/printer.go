@@ -10,7 +10,6 @@ import (
 var (
 	definitions = []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: "the name of the cluster"},
-		{Name: "Provider", Type: "string", Description: "the cluster provider type"},
 		{Name: "Credential-Type", Type: "string", Description: "the credential type"},
 		{Name: "Endpoint-Type", Type: "string", Description: "the endpoint type"},
 		{Name: "Healthy", Type: "string", Description: "the healthiness of the gateway"},
@@ -36,7 +35,6 @@ func printClusterGatewayList(in *ClusterGatewayList) *metav1.Table {
 
 func printClusterGatewayRow(c *ClusterGateway) metav1.TableRow {
 	name := c.Name
-	provideType := c.Spec.Provider
 	credType := "<none>"
 	if c.Spec.Access.Credential != nil {
 		credType = string(c.Spec.Access.Credential.Type)
@@ -45,6 +43,6 @@ func printClusterGatewayRow(c *ClusterGateway) metav1.TableRow {
 	row := metav1.TableRow{
 		Object: runtime.RawExtension{Object: c},
 	}
-	row.Cells = append(row.Cells, name, provideType, credType, epType, strconv.FormatBool(c.Status.Healthy))
+	row.Cells = append(row.Cells, name, credType, epType, strconv.FormatBool(c.Status.Healthy))
 	return row
 }

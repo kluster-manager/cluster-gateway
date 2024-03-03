@@ -64,10 +64,6 @@ spec:
                     - proxyServerHost
                     - proxyServerPort
                     type: object
-                  type:
-                    type: string
-                required:
-                - type
                 type: object
               image:
                 type: string

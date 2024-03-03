@@ -31,9 +31,6 @@ func ValidateClusterGateway(c *ClusterGateway) field.ErrorList {
 
 func ValidateClusterGatewaySpec(c *ClusterGatewaySpec, path *field.Path) field.ErrorList {
 	var errs field.ErrorList
-	if len(c.Provider) == 0 {
-		errs = append(errs, field.Required(path.Child("provider"), "should set provider"))
-	}
 	errs = append(errs, ValidateClusterGatewaySpecAccess(&c.Access, path.Child("access"))...)
 	return errs
 }

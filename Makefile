@@ -103,7 +103,7 @@ client-gen:
 	go install sigs.k8s.io/apiserver-runtime/tools/apiserver-runtime-gen@v1.1.1
 	apiserver-runtime-gen \
 	--module github.com/kluster-manager/cluster-gateway \
-	-g client-gen \
+	-g deepcopy-gen,client-gen \
 	--versions=github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1 \
 	--install-generators=false
 	rm -rf pkg/generated/clientset/versioned/typed/gateway/v1alpha1/fake

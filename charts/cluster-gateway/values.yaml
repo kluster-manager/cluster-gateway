@@ -5,17 +5,12 @@ tag:
 
 # Number of replicas
 replicas: 1
-# A secured namespace for reading cluster secrets
-secretNamespace: open-cluster-management-credentials
 
-ocmIntegration:
+clusterProxy:
   enabled: false
-  clusterProxy:
-    enabled: false
-    endpoint:
-      host: proxy-entrypoint.open-cluster-management-cluster-proxy
-      port: 8090
+  endpoint:
+    host: proxy-entrypoint.open-cluster-management-cluster-proxy
+    port: 8090
 
 featureGate:
   healthiness: false
-  secretCache: false

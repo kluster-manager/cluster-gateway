@@ -56,9 +56,8 @@ type ClusterGatewayList struct {
 
 // ClusterGatewaySpec defines the desired state of ClusterGateway
 type ClusterGatewaySpec struct {
-	Provider    string                            `json:"provider"`
 	Access      ClusterAccess                     `json:"access"`
-	ProxyConfig *ClusterGatewayProxyConfiguration `json:"-"`
+	ProxyConfig *ClusterGatewayProxyConfiguration `json:"proxyConfig,omitempty"`
 }
 
 type ClusterAccess struct {
@@ -115,8 +114,8 @@ type ClusterEndpointConst struct {
 type ClusterAccessCredential struct {
 	// Type is the union discriminator for credential contents.
 	Type                CredentialType `json:"type"`
-	ServiceAccountToken string         `json:"serviceAccountToken,omitempty"`
-	X509                *X509          `json:"x509,omitempty"`
+	ServiceAccountToken string         `json:"-"`
+	X509                *X509          `json:"-"`
 }
 
 type X509 struct {
