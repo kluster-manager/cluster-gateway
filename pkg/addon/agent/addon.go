@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"open-cluster-management.io/addon-framework/pkg/agent"
@@ -34,53 +35,60 @@ type clusterGatewayAddonManager struct {
 }
 
 func (c *clusterGatewayAddonManager) Manifests(cluster *clusterv1.ManagedCluster, addon *addonv1alpha1.ManagedClusterAddOn) ([]runtime.Object, error) {
-	if len(addon.Status.AddOnConfiguration.CRName) == 0 {
-		return nil, nil
-	}
-	cfg := &configv1alpha1.ClusterGatewayConfiguration{}
-	if err := c.client.Get(
-		context.TODO(), types.NamespacedName{
-			Name: addon.Status.AddOnConfiguration.CRName,
-		},
-		cfg); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
+	for _, ref := range addon.Status.ConfigReferences {
+		if ref.ConfigGroupResource.Group != configv1alpha1.GroupVersion.Group ||
+			ref.ConfigGroupResource.Resource != "clustergatewayconfigurations" {
+			continue
 		}
-		return nil, errors.Wrapf(err, "failed getting gateway configuration")
-	}
 
-	if cfg.Spec.SecretManagement.Type == configv1alpha1.SecretManagementTypeManual {
-		return nil, nil
-	}
-	switch cfg.Spec.SecretManagement.Type {
-	case configv1alpha1.SecretManagementTypeManagedServiceAccount:
-		managedServiceAccountAddon := &addonv1alpha1.ManagedClusterAddOn{}
+		cfg := &configv1alpha1.ClusterGatewayConfiguration{}
 		if err := c.client.Get(
-			context.TODO(),
-			types.NamespacedName{
-				Namespace: cluster.Name,
-				Name:      "managed-serviceaccount",
+			context.TODO(), types.NamespacedName{
+				Name: ref.Name,
 			},
-			managedServiceAccountAddon); err != nil {
+			cfg); err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil, nil
 			}
-			return nil, err
+			return nil, errors.Wrapf(err, "failed getting gateway configuration")
 		}
-		return buildClusterGatewayOutboundPermission(
-			managedServiceAccountAddon.Spec.InstallNamespace,
-			cfg.Spec.SecretManagement.ManagedServiceAccount.Name), nil
-	case configv1alpha1.SecretManagementTypeManual:
-		fallthrough
-	default:
-		return nil, nil
+
+		if cfg.Spec.SecretManagement.Type == configv1alpha1.SecretManagementTypeManual {
+			return nil, nil
+		}
+		switch cfg.Spec.SecretManagement.Type {
+		case configv1alpha1.SecretManagementTypeManagedServiceAccount:
+			managedServiceAccountAddon := &addonv1alpha1.ManagedClusterAddOn{}
+			if err := c.client.Get(
+				context.TODO(),
+				types.NamespacedName{
+					Namespace: cluster.Name,
+					Name:      "managed-serviceaccount",
+				},
+				managedServiceAccountAddon); err != nil {
+				if apierrors.IsNotFound(err) {
+					return nil, nil
+				}
+				return nil, err
+			}
+			return buildClusterGatewayOutboundPermission(
+				managedServiceAccountAddon.Spec.InstallNamespace,
+				cfg.Spec.SecretManagement.ManagedServiceAccount.Name), nil
+		case configv1alpha1.SecretManagementTypeManual:
+			fallthrough
+		default:
+			return nil, nil
+		}
 	}
+	return nil, nil
 }
 
 func (c *clusterGatewayAddonManager) GetAgentAddonOptions() agent.AgentAddonOptions {
 	return agent.AgentAddonOptions{
-		AddonName:       common.AddonName,
-		InstallStrategy: agent.InstallAllStrategy(common.InstallNamespace),
+		AddonName: common.AddonName,
+		SupportedConfigGVRs: []schema.GroupVersionResource{
+			configv1alpha1.GroupVersion.WithResource("clustergatewayconfigurations"),
+		},
 		HealthProber: &agent.HealthProber{
 			Type: agent.HealthProberTypeNone, // TODO: switch to ManifestWork-based prober
 		},
