@@ -29,7 +29,7 @@ var (
 )
 
 func init() {
-	addonv1alpha1.AddToScheme(scheme)
+	addonv1alpha1.Install(scheme)
 	configv1alpha1.AddToScheme(scheme)
 	nativescheme.AddToScheme(scheme)
 	apiregistrationv1.AddToScheme(scheme)
@@ -69,7 +69,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	currentNamespace := os.Getenv("NAMESPACE")
+	currentNamespace := os.Getenv("POD_NAMESPACE")
 	if len(currentNamespace) == 0 {
 		inClusterNamespace, err := util.GetInClusterNamespace()
 		if err != nil {

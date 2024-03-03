@@ -5,13 +5,12 @@ import (
 	"context"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
-
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 	corev1lister "k8s.io/client-go/listers/core/v1"
 )
@@ -81,24 +80,16 @@ type SecretControl interface {
 var _ SecretControl = &directApiSecretControl{}
 
 type directApiSecretControl struct {
-	secretNamespace string
-	kubeClient      kubernetes.Interface
+	kubeClient kubernetes.Interface
 }
 
 func (d *directApiSecretControl) Get(ctx context.Context, name string) (*corev1.Secret, error) {
-	return d.kubeClient.CoreV1().Secrets(d.secretNamespace).Get(ctx, name, metav1.GetOptions{})
+	return d.kubeClient.CoreV1().Secrets(name).Get(ctx, common.AddonName, metav1.GetOptions{})
 }
 
 func (d *directApiSecretControl) List(ctx context.Context) ([]*corev1.Secret, error) {
-	requirement, err := labels.NewRequirement(
-		common.LabelKeyClusterCredentialType,
-		selection.Exists,
-		nil)
-	if err != nil {
-		return nil, err
-	}
-	secretList, err := d.kubeClient.CoreV1().Secrets(d.secretNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: labels.NewSelector().Add(*requirement).String(),
+	secretList, err := d.kubeClient.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", common.AddonName).String(),
 	})
 	if err != nil {
 		return nil, err
@@ -113,36 +104,35 @@ func (d *directApiSecretControl) List(ctx context.Context) ([]*corev1.Secret, er
 var _ SecretControl = &cachedSecretControl{}
 
 type cachedSecretControl struct {
-	secretNamespace string
-	secretLister    corev1lister.SecretLister
+	secretLister corev1lister.SecretLister
 }
 
 func (c *cachedSecretControl) Get(ctx context.Context, name string) (*corev1.Secret, error) {
-	return c.secretLister.Secrets(c.secretNamespace).Get(name)
+	return c.secretLister.Secrets(name).Get(common.AddonName)
 }
 
 func (c *cachedSecretControl) List(ctx context.Context) ([]*corev1.Secret, error) {
-	requirement, err := labels.NewRequirement(
-		common.LabelKeyClusterCredentialType,
-		selection.Exists,
-		nil)
-	if err != nil {
-		return nil, err
-	}
-	selector := labels.NewSelector().Add(*requirement)
-	return c.secretLister.Secrets(c.secretNamespace).List(selector)
+	//requirement, err := labels.NewRequirement(
+	//	common.LabelKeyClusterCredentialType,
+	//	selection.Exists,
+	//	nil)
+	//if err != nil {
+	//	return nil, err
+	//}
+	selector := labels.SelectorFromSet(map[string]string{
+		common.LabelKeyManagedServiceAccount: "true",
+	})
+	return c.secretLister.Secrets(metav1.NamespaceAll).List(selector)
 }
 
-func NewDirectApiSecretControl(secretNamespace string, kubeClient kubernetes.Interface) SecretControl {
+func NewDirectApiSecretControl(kubeClient kubernetes.Interface) SecretControl {
 	return &directApiSecretControl{
-		secretNamespace: secretNamespace,
-		kubeClient:      kubeClient,
+		kubeClient: kubeClient,
 	}
 }
 
-func NewCachedSecretControl(secretNamespace string, secretLister corev1lister.SecretLister) SecretControl {
+func NewCachedSecretControl(secretLister corev1lister.SecretLister) SecretControl {
 	return &cachedSecretControl{
-		secretNamespace: secretNamespace,
-		secretLister:    secretLister,
+		secretLister: secretLister,
 	}
 }

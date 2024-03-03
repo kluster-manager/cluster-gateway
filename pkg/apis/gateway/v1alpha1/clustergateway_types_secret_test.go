@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
-	"github.com/kluster-manager/cluster-gateway/pkg/config"
 	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
 	"github.com/kluster-manager/cluster-gateway/pkg/options"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
@@ -401,7 +400,6 @@ func TestConvertSecretAndClusterToGateway(t *testing.T) {
 
 func TestGetClusterGateway(t *testing.T) {
 	options.OCMIntegration = false
-	config.SecretNamespace = testNamespace
 	input := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -417,7 +415,7 @@ func TestGetClusterGateway(t *testing.T) {
 		},
 	}
 	fakeKubeClient := fake.NewSimpleClientset(input)
-	singleton.SetSecretControl(cert.NewDirectApiSecretControl(testNamespace, fakeKubeClient))
+	singleton.SetSecretControl(cert.NewDirectApiSecretControl(fakeKubeClient))
 	expected, err := convertFromSecret(input)
 	storage := &ClusterGateway{}
 	gwRaw, err := storage.Get(context.TODO(), testName, &metav1.GetOptions{})
@@ -427,7 +425,6 @@ func TestGetClusterGateway(t *testing.T) {
 
 func TestListClusterGateway(t *testing.T) {
 	options.OCMIntegration = false
-	config.SecretNamespace = testNamespace
 	input := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNamespace,
@@ -444,7 +441,7 @@ func TestListClusterGateway(t *testing.T) {
 		},
 	}
 	fakeKubeClient := fake.NewSimpleClientset(input)
-	singleton.SetSecretControl(cert.NewDirectApiSecretControl(testNamespace, fakeKubeClient))
+	singleton.SetSecretControl(cert.NewDirectApiSecretControl(fakeKubeClient))
 
 	storage := &ClusterGateway{}
 	gws, err := storage.List(context.TODO(), &internalversion.ListOptions{})
@@ -510,7 +507,7 @@ func TestListHybridClusterGateway(t *testing.T) {
 	}
 	fakeKubeClient := fake.NewSimpleClientset(inputWithCluster, inputNoCluster, inputDummy)
 	fakeOcmClient := ocmclientfake.NewSimpleClientset(cluster)
-	singleton.SetSecretControl(cert.NewDirectApiSecretControl(testNamespace, fakeKubeClient))
+	singleton.SetSecretControl(cert.NewDirectApiSecretControl(fakeKubeClient))
 	singleton.SetOCMClient(fakeOcmClient)
 
 	storage := &ClusterGateway{}

@@ -20,7 +20,6 @@ import (
 	"context"
 	"sort"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
@@ -28,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/utils/strings/slices"
 	ocmclusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -46,35 +44,21 @@ type VirtualClusterClient interface {
 
 type virtualClusterClient struct {
 	client.Client
-	namespace        string
-	withControlPlane bool
 }
 
 // NewVirtualClusterClient create a client for accessing cluster
-func NewVirtualClusterClient(cli client.Client, namespace string, withControlPlane bool) VirtualClusterClient {
-	return &virtualClusterClient{Client: cli, namespace: namespace, withControlPlane: withControlPlane}
+func NewVirtualClusterClient(cli client.Client) VirtualClusterClient {
+	return &virtualClusterClient{Client: cli}
 }
 
 func (c *virtualClusterClient) Get(ctx context.Context, name string) (*VirtualCluster, error) {
 	if name == ClusterLocalName {
 		return NewLocalCluster(), nil
 	}
-	key := types.NamespacedName{Name: name, Namespace: c.namespace}
+	key := types.NamespacedName{Name: name}
 	var cluster *VirtualCluster
-	secret := &corev1.Secret{}
-	err := c.Client.Get(ctx, key, secret)
-	var secretErr error
-	if err == nil {
-		if cluster, secretErr = NewClusterFromSecret(secret); secretErr == nil {
-			return cluster, nil
-		}
-	}
-	if err != nil && !apierrors.IsNotFound(err) {
-		secretErr = err
-	}
-
 	managedCluster := &ocmclusterv1.ManagedCluster{}
-	err = c.Client.Get(ctx, key, managedCluster)
+	err := c.Client.Get(ctx, key, managedCluster)
 	var managedClusterErr error
 	if err == nil {
 		if cluster, managedClusterErr = NewClusterFromManagedCluster(managedCluster); managedClusterErr == nil {
@@ -85,18 +69,13 @@ func (c *virtualClusterClient) Get(ctx context.Context, name string) (*VirtualCl
 	if err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) && !runtime.IsNotRegisteredError(err) {
 		managedClusterErr = err
 	}
-
-	errs := utilerrors.NewAggregate([]error{secretErr, managedClusterErr})
-	if errs == nil {
-		return nil, apierrors.NewNotFound(schema.GroupResource{
-			Group:    config.MetaApiGroupName,
-			Resource: "virtualclusters",
-		}, name)
-	} else if len(errs.Errors()) == 1 {
-		return nil, errs.Errors()[0]
-	} else {
-		return nil, errs
+	if managedClusterErr != nil {
+		return nil, managedClusterErr
 	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{
+		Group:    config.MetaApiGroupName,
+		Resource: "virtualclusters",
+	}, name)
 }
 
 func (c *virtualClusterClient) List(ctx context.Context, options ...client.ListOption) (*VirtualClusterList, error) {
@@ -107,19 +86,8 @@ func (c *virtualClusterClient) List(ctx context.Context, options ...client.ListO
 	local := NewLocalCluster()
 	clusters := &VirtualClusterList{Items: []VirtualCluster{*local}}
 
-	secrets := &corev1.SecretList{}
-	err := c.Client.List(ctx, secrets, virtualClusterSelector{selector: opts.LabelSelector, requireCredentialType: true, namespace: c.namespace})
-	if err != nil {
-		return nil, err
-	}
-	for _, secret := range secrets.Items {
-		if cluster, err := NewClusterFromSecret(secret.DeepCopy()); err == nil {
-			clusters.Items = append(clusters.Items, *cluster)
-		}
-	}
-
 	managedClusters := &ocmclusterv1.ManagedClusterList{}
-	err = c.Client.List(ctx, managedClusters, virtualClusterSelector{selector: opts.LabelSelector, requireCredentialType: false})
+	err := c.Client.List(ctx, managedClusters, virtualClusterSelector{selector: opts.LabelSelector, requireCredentialType: false})
 	if err != nil && !meta.IsNoMatchError(err) && !runtime.IsNotRegisteredError(err) {
 		return nil, err
 	}

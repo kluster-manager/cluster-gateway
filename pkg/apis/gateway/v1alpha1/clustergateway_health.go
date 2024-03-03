@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,7 +49,7 @@ func (in *ClusterGatewayHealth) Update(ctx context.Context, name string, objInfo
 		return nil, false, fmt.Errorf("loopback clients are not inited")
 	}
 
-	latestSecret, err := singleton.GetSecretControl().Get(ctx, name)
+	latestSecret, err := singleton.GetSecretControl().Get(ctx, common.AddonName)
 	if err != nil {
 		return nil, false, err
 	}
@@ -65,7 +65,7 @@ func (in *ClusterGatewayHealth) Update(ctx context.Context, name string, objInfo
 	latestSecret.Annotations[AnnotationKeyClusterGatewayStatusHealthyReason] = string(updatingClusterGateway.Status.HealthyReason)
 	updated, err := singleton.GetKubeClient().
 		CoreV1().
-		Secrets(config.SecretNamespace).
+		Secrets(name).
 		Update(ctx, latestSecret, metav1.UpdateOptions{})
 	if err != nil {
 		return nil, false, err

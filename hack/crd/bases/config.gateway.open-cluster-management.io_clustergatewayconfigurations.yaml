@@ -88,14 +88,11 @@ spec:
                     - ManagedServiceAccount
                     type: string
                 type: object
-              secretNamespace:
-                type: string
             required:
             - egress
             - image
             - installNamespace
             - secretManagement
-            - secretNamespace
             type: object
           status:
             properties:

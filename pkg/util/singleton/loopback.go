@@ -1,8 +1,11 @@
 package singleton
 
 import (
+	"context"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/server"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -19,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controllerruntimeconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
 	clusterutil "github.com/kluster-manager/cluster-gateway/pkg/util/cluster"
@@ -85,10 +88,10 @@ func InitLoopbackClient(ctx server.PostStartHookContext) error {
 		if err := setInformer(kubeClient, ctx.StopCh); err != nil {
 			return err
 		}
-		secretControl = cert.NewCachedSecretControl(config.SecretNamespace, secretLister)
+		secretControl = cert.NewCachedSecretControl(secretLister)
 	}
 	if secretControl == nil {
-		secretControl = cert.NewDirectApiSecretControl(config.SecretNamespace, kubeClient)
+		secretControl = cert.NewDirectApiSecretControl(kubeClient)
 	}
 
 	if utilfeature.DefaultMutableFeatureGate.Enabled(featuregates.OCMClusterCache) {
@@ -110,14 +113,16 @@ func InitLoopbackClient(ctx server.PostStartHookContext) error {
 }
 
 func setInformer(k kubernetes.Interface, stopCh <-chan struct{}) error {
-	secretInformer = corev1informer.NewSecretInformer(k, config.SecretNamespace, 0, cache.Indexers{
+	secretInformer = corev1informer.NewFilteredSecretInformer(k, metav1.NamespaceAll, 0, cache.Indexers{
 		cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+	}, func(opts *metav1.ListOptions) {
+		opts.FieldSelector = fields.OneTermEqualSelector("metadata.name", common.AddonName).String()
 	})
 	secretLister = corev1lister.NewSecretLister(secretInformer.GetIndexer())
 	go secretInformer.Run(stopCh)
-	return wait.PollImmediateUntil(time.Second, func() (done bool, err error) {
+	return wait.PollImmediateUntilWithContext(wait.ContextForChannel(stopCh), time.Second, func(ctx context.Context) (done bool, err error) {
 		return secretInformer.HasSynced(), nil
-	}, stopCh)
+	})
 }
 
 // SetSecretControl is for test only
@@ -140,9 +145,9 @@ func setOCMClusterInformer(c ocmclient.Interface, stopCh <-chan struct{}) error 
 	clusterInformer = ocmClusterInformers.Cluster().V1().ManagedClusters().Informer()
 	clusterLister = ocmClusterInformers.Cluster().V1().ManagedClusters().Lister()
 	go clusterInformer.Run(stopCh)
-	return wait.PollImmediateUntil(time.Second, func() (done bool, err error) {
+	return wait.PollImmediateUntilWithContext(wait.ContextForChannel(stopCh), time.Second, func(ctx context.Context) (done bool, err error) {
 		return clusterInformer.HasSynced(), nil
-	}, stopCh)
+	})
 }
 
 func GetClusterControl() clusterutil.OCMClusterControl {

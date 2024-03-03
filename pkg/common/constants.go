@@ -23,9 +23,11 @@ const (
 	ClusterGatewayAPIServiceName = "v1alpha1.gateway.open-cluster-management.io"
 )
 
-var (
+const (
 	// LabelKeyClusterCredentialType describes the credential type in object label field
 	LabelKeyClusterCredentialType = config.MetaApiGroupName + "/cluster-credential-type"
 	// LabelKeyClusterEndpointType describes the endpoint type.
 	LabelKeyClusterEndpointType = config.MetaApiGroupName + "/cluster-endpoint-type"
+	// LabelKeyManagedServiceAccount describes the label used by managed service account secret
+	LabelKeyManagedServiceAccount = "authentication.open-cluster-management.io/is-managed-serviceaccount"
 )

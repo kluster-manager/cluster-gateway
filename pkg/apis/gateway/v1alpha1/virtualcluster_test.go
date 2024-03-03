@@ -37,7 +37,6 @@ import (
 
 	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
 	clustergatewaycommon "github.com/kluster-manager/cluster-gateway/pkg/common"
-	"github.com/kluster-manager/cluster-gateway/pkg/config"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/scheme"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 )
@@ -101,13 +100,13 @@ var _ = Describe("Test Cluster API", func() {
 		ctx := context.Background()
 
 		By("Create storage namespace")
-		Ω(cli.Create(ctx, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: config.SecretNamespace}})).To(Succeed())
+		Ω(cli.Create(ctx, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"}})).To(Succeed())
 
 		By("Create cluster secret")
 		Ω(cli.Create(ctx, &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-cluster",
-				Namespace: config.SecretNamespace,
+				Name:      clustergatewaycommon.AddonName,
+				Namespace: "test-cluster",
 				Labels: map[string]string{
 					clustergatewaycommon.LabelKeyClusterCredentialType: string(gatewayv1alpha1.CredentialTypeX509Certificate),
 					clustergatewaycommon.LabelKeyClusterEndpointType:   string(gatewayv1alpha1.ClusterEndpointTypeConst),
@@ -118,15 +117,15 @@ var _ = Describe("Test Cluster API", func() {
 		})).To(Succeed())
 		Ω(cli.Create(ctx, &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "cluster-invalid",
-				Namespace: config.SecretNamespace,
+				Name:      clustergatewaycommon.AddonName,
+				Namespace: "cluster-invalid",
 			},
 			Data: map[string][]byte{"endpoint": []byte("127.0.0.1:6443")},
 		})).To(Succeed())
 		Ω(cli.Create(ctx, &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "ocm-cluster",
-				Namespace: config.SecretNamespace,
+				Name:      clustergatewaycommon.AddonName,
+				Namespace: "ocm-cluster",
 				Labels: map[string]string{
 					clustergatewaycommon.LabelKeyClusterCredentialType: string(gatewayv1alpha1.CredentialTypeX509Certificate),
 				},
@@ -149,13 +148,13 @@ var _ = Describe("Test Cluster API", func() {
 		Ω(cli.Create(ctx, &ocmclusterv1.ManagedCluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "ocm-bad-cluster",
-				Namespace: config.SecretNamespace,
+				Namespace: "ocm-bad-cluster",
 			},
 		})).To(Succeed())
 		Ω(cli.Create(ctx, &ocmclusterv1.ManagedCluster{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "ocm-cluster",
-				Namespace: config.SecretNamespace,
+				Name:      clustergatewaycommon.AddonName,
+				Namespace: "ocm-cluster",
 				Labels:    map[string]string{"key": "value"},
 			},
 			Spec: ocmclusterv1.ManagedClusterSpec{
@@ -164,8 +163,8 @@ var _ = Describe("Test Cluster API", func() {
 		})).To(Succeed())
 		Ω(cli.Create(ctx, &ocmclusterv1.ManagedCluster{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-cluster",
-				Namespace: config.SecretNamespace,
+				Name:      clustergatewaycommon.AddonName,
+				Namespace: "test-cluster",
 				Labels:    map[string]string{"key": "value-dup"},
 			},
 			Spec: ocmclusterv1.ManagedClusterSpec{
