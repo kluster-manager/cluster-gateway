@@ -48,8 +48,8 @@ const (
 )
 
 var DefaultKubeFedFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-	HealthinessCheck:          {Default: false, PreRelease: featuregate.Alpha},
+	HealthinessCheck:          {Default: true, PreRelease: featuregate.Beta},
 	SecretCache:               {Default: true, PreRelease: featuregate.Beta},
-	ClientIdentityPenetration: {Default: false, PreRelease: featuregate.Alpha},
+	ClientIdentityPenetration: {Default: true, PreRelease: featuregate.Beta},
 	OCMClusterCache:           {Default: true, PreRelease: featuregate.Beta},
 }
