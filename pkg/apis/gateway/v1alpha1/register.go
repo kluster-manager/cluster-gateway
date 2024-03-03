@@ -24,9 +24,9 @@ import (
 	"k8s.io/klog"
 	ocmclusterv1 "open-cluster-management.io/api/cluster/v1"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
 
-	"github.com/oam-dev/cluster-gateway/pkg/util/scheme"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/scheme"
 )
 
 func init() {

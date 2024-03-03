@@ -7,5 +7,5 @@ spec:
     displayName: cluster-gateway
     description: cluster-gateway
   addOnConfiguration:
-    crdName: clustergatewayconfigurations.proxy.open-cluster-management.io
+    crdName: clustergatewayconfigurations.config.gateway.open-cluster-management.io
     crName: cluster-gateway

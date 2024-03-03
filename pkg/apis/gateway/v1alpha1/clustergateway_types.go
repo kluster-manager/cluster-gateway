@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource/resourcestrategy"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
 // +genclient

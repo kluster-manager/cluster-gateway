@@ -12,8 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	proxyv1alpha1 "github.com/oam-dev/cluster-gateway/pkg/apis/proxy/v1alpha1"
-	"github.com/oam-dev/cluster-gateway/pkg/common"
+	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 )
 
 var _ handler.EventHandler = &ClusterGatewayConfigurationHandler{}
@@ -23,26 +23,26 @@ type ClusterGatewayConfigurationHandler struct {
 }
 
 func (c *ClusterGatewayConfigurationHandler) Create(ctx context.Context, event event.CreateEvent, q workqueue.RateLimitingInterface) {
-	cfg := event.Object.(*proxyv1alpha1.ClusterGatewayConfiguration)
+	cfg := event.Object.(*configv1alpha1.ClusterGatewayConfiguration)
 	c.process(ctx, cfg, q)
 }
 
 func (c *ClusterGatewayConfigurationHandler) Update(ctx context.Context, event event.UpdateEvent, q workqueue.RateLimitingInterface) {
-	cfg := event.ObjectNew.(*proxyv1alpha1.ClusterGatewayConfiguration)
+	cfg := event.ObjectNew.(*configv1alpha1.ClusterGatewayConfiguration)
 	c.process(ctx, cfg, q)
 }
 
 func (c *ClusterGatewayConfigurationHandler) Delete(ctx context.Context, event event.DeleteEvent, q workqueue.RateLimitingInterface) {
-	cfg := event.Object.(*proxyv1alpha1.ClusterGatewayConfiguration)
+	cfg := event.Object.(*configv1alpha1.ClusterGatewayConfiguration)
 	c.process(ctx, cfg, q)
 }
 
 func (c *ClusterGatewayConfigurationHandler) Generic(ctx context.Context, event event.GenericEvent, q workqueue.RateLimitingInterface) {
-	cfg := event.Object.(*proxyv1alpha1.ClusterGatewayConfiguration)
+	cfg := event.Object.(*configv1alpha1.ClusterGatewayConfiguration)
 	c.process(ctx, cfg, q)
 }
 
-func (c *ClusterGatewayConfigurationHandler) process(ctx context.Context, config *proxyv1alpha1.ClusterGatewayConfiguration, q workqueue.RateLimitingInterface) {
+func (c *ClusterGatewayConfigurationHandler) process(ctx context.Context, config *configv1alpha1.ClusterGatewayConfiguration, q workqueue.RateLimitingInterface) {
 	list := addonv1alpha1.ClusterManagementAddOnList{}
 
 	if err := c.Client.List(ctx, &list); err != nil {

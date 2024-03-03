@@ -5,11 +5,11 @@ import (
 	"flag"
 	"os"
 
-	"github.com/oam-dev/cluster-gateway/pkg/addon/agent"
-	"github.com/oam-dev/cluster-gateway/pkg/addon/controllers"
-	proxyv1alpha1 "github.com/oam-dev/cluster-gateway/pkg/apis/proxy/v1alpha1"
-	"github.com/oam-dev/cluster-gateway/pkg/util"
-	"github.com/oam-dev/cluster-gateway/pkg/util/cert"
+	"github.com/kluster-manager/cluster-gateway/pkg/addon/agent"
+	"github.com/kluster-manager/cluster-gateway/pkg/addon/controllers"
+	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/util"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -30,7 +30,7 @@ var (
 
 func init() {
 	addonv1alpha1.AddToScheme(scheme)
-	proxyv1alpha1.AddToScheme(scheme)
+	configv1alpha1.AddToScheme(scheme)
 	nativescheme.AddToScheme(scheme)
 	apiregistrationv1.AddToScheme(scheme)
 	ocmauthv1beta1.AddToScheme(scheme)

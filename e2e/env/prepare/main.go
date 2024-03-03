@@ -3,10 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
-	"github.com/oam-dev/cluster-gateway/pkg/common"
 	"os"
 	"path/filepath"
+
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 
 	"github.com/ghodss/yaml"
 	corev1 "k8s.io/api/core/v1"
@@ -56,7 +57,7 @@ func main() {
 	if len(restConfig.BearerToken) > 0 {
 		// TODO
 	} else {
-		secret.Labels[common.LabelKeyClusterCredentialType] = string(v1alpha1.CredentialTypeX509Certificate)
+		secret.Labels[common.LabelKeyClusterCredentialType] = string(gatewayv1alpha1.CredentialTypeX509Certificate)
 		secret.Data["tls.crt"] = restConfig.CertData
 		secret.Data["tls.key"] = restConfig.KeyData
 	}

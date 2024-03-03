@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/oam-dev/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"

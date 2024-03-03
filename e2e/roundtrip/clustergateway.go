@@ -10,9 +10,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
-	"github.com/oam-dev/cluster-gateway/e2e/framework"
-	multicluster "github.com/oam-dev/cluster-gateway/pkg/apis/cluster/transport"
-	clusterv1alpha1 "github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/e2e/framework"
+	multicluster "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/transport"
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
 )
 
 const (
@@ -27,7 +27,7 @@ var _ = Describe("Basic RoundTrip Test", func() {
 			By("Discovering ClusterGateway")
 			nativeClient := f.HubNativeClient()
 			resources, err := nativeClient.Discovery().
-				ServerResourcesForGroupVersion("cluster.core.oam.dev/v1alpha1")
+				ServerResourcesForGroupVersion("gateway.open-cluster-management.io/v1alpha1")
 			Expect(err).NotTo(HaveOccurred())
 			apiFound := false
 			for _, resource := range resources.APIResources {
@@ -57,7 +57,7 @@ var _ = Describe("Basic RoundTrip Test", func() {
 		func() {
 			By("Getting ClusterGateway")
 			runtimeClient := f.HubRuntimeClient()
-			clusterGateway := &clusterv1alpha1.ClusterGateway{}
+			clusterGateway := &gatewayv1alpha1.ClusterGateway{}
 			err := runtimeClient.Get(context.TODO(), types.NamespacedName{
 				Name: f.TestClusterName(),
 			}, clusterGateway)
@@ -68,7 +68,7 @@ var _ = Describe("Basic RoundTrip Test", func() {
 		func() {
 			By("Getting ClusterGateway")
 			runtimeClient := f.HubRuntimeClient()
-			clusterGatewayList := &clusterv1alpha1.ClusterGatewayList{}
+			clusterGatewayList := &gatewayv1alpha1.ClusterGatewayList{}
 			err := runtimeClient.List(context.TODO(), clusterGatewayList)
 			Expect(err).NotTo(HaveOccurred())
 			clusterFound := false
@@ -86,7 +86,7 @@ var _ = Describe("Basic RoundTrip Test", func() {
 		func() {
 			By("get healthiness")
 			gw, err := f.HubGatewayClient().
-				ClusterV1alpha1().
+				GatewayV1alpha1().
 				ClusterGateways().
 				GetHealthiness(context.TODO(), f.TestClusterName(), metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -94,15 +94,15 @@ var _ = Describe("Basic RoundTrip Test", func() {
 			Expect(gw.Status.Healthy).To(BeFalse())
 			By("update healthiness")
 			gw.Status.Healthy = true
-			gw.Status.HealthyReason = clusterv1alpha1.HealthyReasonTypeConnectionTimeout
+			gw.Status.HealthyReason = gatewayv1alpha1.HealthyReasonTypeConnectionTimeout
 			updated, err := f.HubGatewayClient().
-				ClusterV1alpha1().
+				GatewayV1alpha1().
 				ClusterGateways().
 				UpdateHealthiness(context.TODO(), gw, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated).NotTo(BeNil())
 			Expect(updated.Status.Healthy).To(BeTrue())
-			Expect(updated.Status.HealthyReason).To(Equal(clusterv1alpha1.HealthyReasonTypeConnectionTimeout))
+			Expect(updated.Status.HealthyReason).To(Equal(gatewayv1alpha1.HealthyReasonTypeConnectionTimeout))
 		})
 
 	It("Probing cluster health (raw)",
@@ -111,7 +111,7 @@ var _ = Describe("Basic RoundTrip Test", func() {
 				RESTClient().
 				Get().
 				AbsPath(
-					"apis/cluster.core.oam.dev/v1alpha1/clustergateways",
+					"apis/gateway.open-cluster-management.io/v1alpha1/clustergateways",
 					f.TestClusterName(),
 					"proxy",
 					"healthz",

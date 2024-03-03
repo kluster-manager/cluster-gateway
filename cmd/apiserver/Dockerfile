@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.20-alpine as builder
+FROM golang:1.22 as builder
 ARG OS
 ARG ARCH
 
@@ -16,14 +16,14 @@ COPY cmd/ cmd/
 COPY pkg/ pkg/
 COPY hack/ hack/
 
-ARG API_GROUP_NAME=cluster.core.oam.dev
+ARG API_GROUP_NAME=gateway.open-cluster-management.io
 
 # Build
 RUN CGO_ENABLED=0 \
     GOOS=${OS} \
     GOARCH=${ARCH} \
     go build \
-        -ldflags="-X 'github.com/oam-dev/cluster-gateway/pkg/config.MetaApiGroupName=${API_GROUP_NAME}'" \
+        -ldflags="-X 'github.com/kluster-manager/cluster-gateway/pkg/config.MetaApiGroupName=${API_GROUP_NAME}'" \
         -o apiserver \
         cmd/apiserver/main.go
 

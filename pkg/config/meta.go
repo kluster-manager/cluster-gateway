@@ -1,5 +1,5 @@
 package config
 
-var MetaApiGroupName = "cluster.core.oam.dev"
+var MetaApiGroupName = "gateway.open-cluster-management.io"
 var MetaApiVersionName = "v1alpha1"
 var MetaApiResourceName = "clustergateways"

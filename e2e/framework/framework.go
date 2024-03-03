@@ -9,7 +9,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/oam-dev/cluster-gateway/pkg/generated/clientset/versioned"
+	"github.com/kluster-manager/cluster-gateway/pkg/generated/clientset/versioned"
 )
 
 // unique identifier of the e2e run

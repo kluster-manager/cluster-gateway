@@ -35,11 +35,11 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/oam-dev/cluster-gateway/pkg/apis/cluster/v1alpha1"
-	clustergatewaycommon "github.com/oam-dev/cluster-gateway/pkg/common"
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/util/scheme"
-	"github.com/oam-dev/cluster-gateway/pkg/util/singleton"
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
+	clustergatewaycommon "github.com/kluster-manager/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/scheme"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 )
 
 func TestVirtualCluster(t *testing.T) {
@@ -77,14 +77,14 @@ var _ = AfterSuite(func() {
 var _ = Describe("Test Cluster API", func() {
 
 	It("Test Cluster API", func() {
-		c := &v1alpha1.VirtualCluster{}
+		c := &gatewayv1alpha1.VirtualCluster{}
 		c.SetName("example")
 		Ω(c.GetFullName()).To(Equal("example"))
 		c.Spec.Alias = "alias"
 		Ω(c.GetFullName()).To(Equal("example (alias)"))
 
 		By("Test meta info")
-		Ω(c.New()).To(Equal(&v1alpha1.VirtualCluster{}))
+		Ω(c.New()).To(Equal(&gatewayv1alpha1.VirtualCluster{}))
 		Ω(c.NamespaceScoped()).To(BeFalse())
 		Ω(c.ShortNames()).To(SatisfyAll(
 			ContainElement("vc"),
@@ -93,10 +93,10 @@ var _ = Describe("Test Cluster API", func() {
 			ContainElement("virtual-cluster"),
 			ContainElement("virtual-clusters"),
 		))
-		Ω(c.GetGroupVersionResource().GroupVersion()).To(Equal(v1alpha1.SchemeGroupVersion))
+		Ω(c.GetGroupVersionResource().GroupVersion()).To(Equal(gatewayv1alpha1.SchemeGroupVersion))
 		Ω(c.GetGroupVersionResource().Resource).To(Equal("virtualclusters"))
 		Ω(c.IsStorageVersion()).To(BeTrue())
-		Ω(c.NewList()).To(Equal(&v1alpha1.VirtualClusterList{}))
+		Ω(c.NewList()).To(Equal(&gatewayv1alpha1.VirtualClusterList{}))
 
 		ctx := context.Background()
 
@@ -109,11 +109,11 @@ var _ = Describe("Test Cluster API", func() {
 				Name:      "test-cluster",
 				Namespace: config.SecretNamespace,
 				Labels: map[string]string{
-					clustergatewaycommon.LabelKeyClusterCredentialType: string(v1alpha1.CredentialTypeX509Certificate),
-					clustergatewaycommon.LabelKeyClusterEndpointType:   string(v1alpha1.ClusterEndpointTypeConst),
+					clustergatewaycommon.LabelKeyClusterCredentialType: string(gatewayv1alpha1.CredentialTypeX509Certificate),
+					clustergatewaycommon.LabelKeyClusterEndpointType:   string(gatewayv1alpha1.ClusterEndpointTypeConst),
 					"key": "value",
 				},
-				Annotations: map[string]string{v1alpha1.AnnotationClusterAlias: "test-cluster-alias"},
+				Annotations: map[string]string{gatewayv1alpha1.AnnotationClusterAlias: "test-cluster-alias"},
 			},
 		})).To(Succeed())
 		Ω(cli.Create(ctx, &v1.Secret{
@@ -128,7 +128,7 @@ var _ = Describe("Test Cluster API", func() {
 				Name:      "ocm-cluster",
 				Namespace: config.SecretNamespace,
 				Labels: map[string]string{
-					clustergatewaycommon.LabelKeyClusterCredentialType: string(v1alpha1.CredentialTypeX509Certificate),
+					clustergatewaycommon.LabelKeyClusterCredentialType: string(gatewayv1alpha1.CredentialTypeX509Certificate),
 				},
 			},
 		})).To(Succeed())
@@ -136,14 +136,14 @@ var _ = Describe("Test Cluster API", func() {
 		By("Test get cluster from cluster secret")
 		obj, err := c.Get(ctx, "test-cluster", nil)
 		Ω(err).To(Succeed())
-		cluster, ok := obj.(*v1alpha1.VirtualCluster)
+		cluster, ok := obj.(*gatewayv1alpha1.VirtualCluster)
 		Ω(ok).To(BeTrue())
 		Ω(cluster.Spec.Alias).To(Equal("test-cluster-alias"))
-		Ω(cluster.Spec.CredentialType).To(Equal(v1alpha1.CredentialTypeX509Certificate))
+		Ω(cluster.Spec.CredentialType).To(Equal(gatewayv1alpha1.CredentialTypeX509Certificate))
 		Ω(cluster.GetLabels()["key"]).To(Equal("value"))
 
 		_, err = c.Get(ctx, "cluster-invalid", nil)
-		Ω(err).To(Satisfy(v1alpha1.IsInvalidClusterSecretError))
+		Ω(err).To(Satisfy(gatewayv1alpha1.IsInvalidClusterSecretError))
 
 		By("Create OCM ManagedCluster")
 		Ω(cli.Create(ctx, &ocmclusterv1.ManagedCluster{
@@ -175,20 +175,20 @@ var _ = Describe("Test Cluster API", func() {
 
 		By("Test get cluster from OCM managed cluster")
 		_, err = c.Get(ctx, "ocm-bad-cluster", nil)
-		Ω(err).To(Satisfy(v1alpha1.IsInvalidManagedClusterError))
+		Ω(err).To(Satisfy(gatewayv1alpha1.IsInvalidManagedClusterError))
 
 		obj, err = c.Get(ctx, "ocm-cluster", nil)
 		Ω(err).To(Succeed())
-		cluster, ok = obj.(*v1alpha1.VirtualCluster)
+		cluster, ok = obj.(*gatewayv1alpha1.VirtualCluster)
 		Ω(ok).To(BeTrue())
-		Expect(cluster.Spec.CredentialType).To(Equal(v1alpha1.CredentialTypeOCMManagedCluster))
+		Expect(cluster.Spec.CredentialType).To(Equal(gatewayv1alpha1.CredentialTypeOCMManagedCluster))
 
 		By("Test get local cluster")
 		obj, err = c.Get(ctx, "local", nil)
 		Ω(err).To(Succeed())
-		cluster, ok = obj.(*v1alpha1.VirtualCluster)
+		cluster, ok = obj.(*gatewayv1alpha1.VirtualCluster)
 		Ω(ok).To(BeTrue())
-		Expect(cluster.Spec.CredentialType).To(Equal(v1alpha1.CredentialTypeInternal))
+		Expect(cluster.Spec.CredentialType).To(Equal(gatewayv1alpha1.CredentialTypeInternal))
 
 		_, err = c.Get(ctx, "cluster-not-exist", nil)
 		Ω(err).To(Satisfy(apierrors.IsNotFound))
@@ -196,7 +196,7 @@ var _ = Describe("Test Cluster API", func() {
 		By("Test list clusters")
 		objs, err := c.List(ctx, nil)
 		Ω(err).To(Succeed())
-		clusters, ok := objs.(*v1alpha1.VirtualClusterList)
+		clusters, ok := objs.(*gatewayv1alpha1.VirtualClusterList)
 		Ω(ok).To(BeTrue())
 		Expect(len(clusters.Items)).To(Equal(3))
 		Expect(clusters.Items[0].Name).To(Equal("local"))
@@ -206,7 +206,7 @@ var _ = Describe("Test Cluster API", func() {
 		By("Test list clusters with labels")
 		objs, err = c.List(ctx, &metainternalversion.ListOptions{LabelSelector: labels.SelectorFromSet(map[string]string{"key": "value"})})
 		Ω(err).To(Succeed())
-		clusters, ok = objs.(*v1alpha1.VirtualClusterList)
+		clusters, ok = objs.(*gatewayv1alpha1.VirtualClusterList)
 		Ω(ok).To(BeTrue())
 		Expect(len(clusters.Items)).To(Equal(2))
 		Expect(clusters.Items[0].Name).To(Equal("ocm-cluster"))
@@ -214,10 +214,10 @@ var _ = Describe("Test Cluster API", func() {
 
 		By("Test list clusters that are not control plane")
 		objs, err = c.List(ctx, &metainternalversion.ListOptions{LabelSelector: labels.SelectorFromSet(map[string]string{
-			v1alpha1.LabelClusterControlPlane: "false",
+			gatewayv1alpha1.LabelClusterControlPlane: "false",
 		})})
 		Ω(err).To(Succeed())
-		clusters, ok = objs.(*v1alpha1.VirtualClusterList)
+		clusters, ok = objs.(*gatewayv1alpha1.VirtualClusterList)
 		Ω(ok).To(BeTrue())
 		Expect(len(clusters.Items)).To(Equal(2))
 		Expect(clusters.Items[0].Name).To(Equal("ocm-cluster"))
@@ -225,10 +225,10 @@ var _ = Describe("Test Cluster API", func() {
 
 		By("Test list clusters that is control plane")
 		objs, err = c.List(ctx, &metainternalversion.ListOptions{LabelSelector: labels.SelectorFromSet(map[string]string{
-			v1alpha1.LabelClusterControlPlane: "true",
+			gatewayv1alpha1.LabelClusterControlPlane: "true",
 		})})
 		Ω(err).To(Succeed())
-		clusters, ok = objs.(*v1alpha1.VirtualClusterList)
+		clusters, ok = objs.(*gatewayv1alpha1.VirtualClusterList)
 		Ω(ok).To(BeTrue())
 		Expect(len(clusters.Items)).To(Equal(1))
 		Expect(clusters.Items[0].Name).To(Equal("local"))

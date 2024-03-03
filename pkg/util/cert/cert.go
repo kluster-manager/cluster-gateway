@@ -7,7 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 
-	"github.com/oam-dev/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/openshift/library-go/pkg/crypto"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"

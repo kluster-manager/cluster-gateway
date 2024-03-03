@@ -6,9 +6,9 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.4.1
   creationTimestamp: null
-  name: clustergatewayconfigurations.proxy.open-cluster-management.io
+  name: clustergatewayconfigurations.config.gateway.open-cluster-management.io
 spec:
-  group: proxy.open-cluster-management.io
+  group: config.gateway.open-cluster-management.io
   names:
     kind: ClusterGatewayConfiguration
     listKind: ClusterGatewayConfigurationList

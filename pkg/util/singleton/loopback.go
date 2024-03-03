@@ -19,11 +19,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controllerruntimeconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	"github.com/oam-dev/cluster-gateway/pkg/config"
-	"github.com/oam-dev/cluster-gateway/pkg/featuregates"
-	"github.com/oam-dev/cluster-gateway/pkg/util/cert"
-	clusterutil "github.com/oam-dev/cluster-gateway/pkg/util/cluster"
-	"github.com/oam-dev/cluster-gateway/pkg/util/scheme"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
+	clusterutil "github.com/kluster-manager/cluster-gateway/pkg/util/cluster"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/scheme"
 )
 
 var kubeClient kubernetes.Interface

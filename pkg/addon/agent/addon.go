@@ -15,8 +15,8 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	proxyv1alpha1 "github.com/oam-dev/cluster-gateway/pkg/apis/proxy/v1alpha1"
-	"github.com/oam-dev/cluster-gateway/pkg/common"
+	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 )
 
 var _ agent.AgentAddon = &clusterGatewayAddonManager{}
@@ -37,7 +37,7 @@ func (c *clusterGatewayAddonManager) Manifests(cluster *clusterv1.ManagedCluster
 	if len(addon.Status.AddOnConfiguration.CRName) == 0 {
 		return nil, nil
 	}
-	cfg := &proxyv1alpha1.ClusterGatewayConfiguration{}
+	cfg := &configv1alpha1.ClusterGatewayConfiguration{}
 	if err := c.client.Get(
 		context.TODO(), types.NamespacedName{
 			Name: addon.Status.AddOnConfiguration.CRName,
@@ -49,11 +49,11 @@ func (c *clusterGatewayAddonManager) Manifests(cluster *clusterv1.ManagedCluster
 		return nil, errors.Wrapf(err, "failed getting gateway configuration")
 	}
 
-	if cfg.Spec.SecretManagement.Type == proxyv1alpha1.SecretManagementTypeManual {
+	if cfg.Spec.SecretManagement.Type == configv1alpha1.SecretManagementTypeManual {
 		return nil, nil
 	}
 	switch cfg.Spec.SecretManagement.Type {
-	case proxyv1alpha1.SecretManagementTypeManagedServiceAccount:
+	case configv1alpha1.SecretManagementTypeManagedServiceAccount:
 		managedServiceAccountAddon := &addonv1alpha1.ManagedClusterAddOn{}
 		if err := c.client.Get(
 			context.TODO(),
@@ -70,7 +70,7 @@ func (c *clusterGatewayAddonManager) Manifests(cluster *clusterv1.ManagedCluster
 		return buildClusterGatewayOutboundPermission(
 			managedServiceAccountAddon.Spec.InstallNamespace,
 			cfg.Spec.SecretManagement.ManagedServiceAccount.Name), nil
-	case proxyv1alpha1.SecretManagementTypeManual:
+	case configv1alpha1.SecretManagementTypeManual:
 		fallthrough
 	default:
 		return nil, nil

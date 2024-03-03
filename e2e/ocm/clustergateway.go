@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 
-	"github.com/oam-dev/cluster-gateway/e2e/framework"
-	"github.com/oam-dev/cluster-gateway/pkg/common"
+	"github.com/kluster-manager/cluster-gateway/e2e/framework"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
 )
 
 const (
@@ -45,7 +45,7 @@ var _ = Describe("Addon Manager Test", func() {
 						addon.Status.Conditions,
 						addonapiv1alpha1.ManagedClusterAddOnConditionAvailable)
 					gw, err := f.HubGatewayClient().
-						ClusterV1alpha1().
+						GatewayV1alpha1().
 						ClusterGateways().
 						GetHealthiness(context.TODO(), f.TestClusterName(), metav1.GetOptions{})
 					if err != nil {
@@ -63,7 +63,7 @@ var _ = Describe("Addon Manager Test", func() {
 				RESTClient().
 				Get().
 				AbsPath(
-					"apis/cluster.core.oam.dev/v1alpha1/clustergateways",
+					"apis/gateway.open-cluster-management.io/v1alpha1/clustergateways",
 					f.TestClusterName(),
 					"proxy",
 					"healthz",

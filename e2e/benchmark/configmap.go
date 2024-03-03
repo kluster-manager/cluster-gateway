@@ -9,8 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/oam-dev/cluster-gateway/e2e/framework"
-	multicluster "github.com/oam-dev/cluster-gateway/pkg/apis/cluster/transport"
+	"github.com/kluster-manager/cluster-gateway/e2e/framework"
+	multicluster "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/transport"
 )
 
 const (

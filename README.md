@@ -6,7 +6,7 @@
 to multiple kubernetes clusters. Additionally, the gateway is completely 
 pluggable for a running kubernetes cluster natively because it is developed
 based on the native api extensibility named [apiserver-aggregation](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/apiserver-aggregation/).
-A new extended resource "cluster.core.oam.dev/ClusterGateway" will be 
+A new extended resource "gateway.open-cluster-management.io/ClusterGateway" will be 
 registered into the hosting cluster after properly applying corresponding 
 `APIService` objects, and a new subresource named "proxy" will be available 
 for every existing "Cluster Gateway" resource which is inspired by the 
@@ -36,10 +36,10 @@ $ docker pull oamdev/cluster-gateway:v1.1.12 # Or other newer tags
 
 ## Documentation
 
-- __Run locally__: https://github.com/oam-dev/cluster-gateway/blob/master/docs/local-run.md
+- __Run locally__: https://github.com/kluster-manager/cluster-gateway/blob/master/docs/local-run.md
 - __Sample cluster-gateway converting secret__:
-  - __ServiceAccountToken type secret__: https://github.com/oam-dev/cluster-gateway/blob/master/hack/samples/cluster-gateway-secret-serviceaccount-token.yaml
-  - __X.509 certificate type secret__: https://github.com/oam-dev/cluster-gateway/blob/master/hack/samples/cluster-gateway-secret-x509.yaml
+  - __ServiceAccountToken type secret__: https://github.com/kluster-manager/cluster-gateway/blob/master/hack/samples/cluster-gateway-secret-serviceaccount-token.yaml
+  - __X.509 certificate type secret__: https://github.com/kluster-manager/cluster-gateway/blob/master/hack/samples/cluster-gateway-secret-x509.yaml
 
 ### Performance
 
@@ -99,7 +99,7 @@ before attempting to talk to an unavailable cluster.
 
 #### Delegating the upgrading/rotation of cluster-gateway to OCM
 
-Installing the cluster-gateway via the [standalone chart](https://github.com/oam-dev/cluster-gateway/tree/master/charts/cluster-gateway)
+Installing the cluster-gateway via the [standalone chart](https://github.com/kluster-manager/cluster-gateway/tree/master/charts/cluster-gateway)
 or [KubeVela's chart](https://github.com/oam-dev/kubevela/tree/master/charts/vela-core)
 provides us a one-time light-weighting setup of cluster-gateway, but sadly 
 there are still some missing puzzles we should notice before we bring the 
@@ -110,7 +110,7 @@ cluster-gateway into sustainable production environment:
   discovery.
 
 In order to fill the blanks in cluster-gateway above, optionally we can delegate
-the management of cluster-gateway to OCM by introducing a new component named [cluster-gateway-addon-manager](https://github.com/oam-dev/cluster-gateway/tree/master/cmd/addon-manager)
+the management of cluster-gateway to OCM by introducing a new component named [cluster-gateway-addon-manager](https://github.com/kluster-manager/cluster-gateway/tree/master/cmd/addon-manager)
 to the hosting cluster which is basically responsible for:
 
 1. Sustainable installation as a typical "operator" dedicated for
@@ -127,10 +127,10 @@ recognize the identity in the incoming requests and use the [impersonation mecha
 to send requests to managed clusters with identity impersonated. By default,
 the impersonated identity is consistent with the identity in the incoming requests.
 
-In the cases that the identity in different clusters are not aligned, the [ClientIdentityExchanger](https://github.com/oam-dev/cluster-gateway/issues/120)
+In the cases that the identity in different clusters are not aligned, the [ClientIdentityExchanger](https://github.com/kluster-manager/cluster-gateway/issues/120)
 feature would be helpful to make projections. You can use either the global configuration
 or the cluster configuration for declaring the identity exchange rules, like the given 
-[example](https://github.com/oam-dev/cluster-gateway/tree/master/examples/client-identity-exchanger/config.yaml).
+[example](https://github.com/kluster-manager/cluster-gateway/tree/master/examples/client-identity-exchanger/config.yaml).
 For global configuration, you need to set up the `--cluster-gateway-proxy-config=<the configuration file path>`
-to enable it. For cluster configuration, you can set the annotation `cluster.core.oam.dev/cluster-gateway-proxy-configuration`
+to enable it. For cluster configuration, you can set the annotation `gateway.open-cluster-management.io/cluster-gateway-proxy-configuration`
 value to enable the configuration for the requests to the attached cluster.

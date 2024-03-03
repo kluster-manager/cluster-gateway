@@ -104,7 +104,7 @@ jobs:
             --set featureGate.healthiness=true \
             --set featureGate.secretCache=true \
             --set tag=latest
-          kubectl wait --for=condition=Available apiservice/v1alpha1.cluster.core.oam.dev
+          kubectl wait --for=condition=Available apiservice/v1alpha1.gateway.open-cluster-management.io
           go run ./e2e/env/prepare | kubectl apply -f -
       - name: Run Make test
         run: |
