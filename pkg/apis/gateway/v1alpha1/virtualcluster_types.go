@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -31,7 +30,6 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 )
@@ -146,7 +144,7 @@ func (in *VirtualClusterList) HasCluster(name string) bool {
 
 // Get finds a resource in the storage by name and returns it.
 func (in *VirtualCluster) Get(ctx context.Context, name string, options *metav1.GetOptions) (runtime.Object, error) {
-	return NewVirtualClusterClient(singleton.GetCtrlClient(), config.SecretNamespace, config.VirtualClusterWithControlPlane).Get(ctx, name)
+	return NewVirtualClusterClient(singleton.GetCtrlClient()).Get(ctx, name)
 }
 
 // List selects resources in the storage which match to the selector. 'options' can be nil.
@@ -155,7 +153,7 @@ func (in *VirtualCluster) List(ctx context.Context, options *internalversion.Lis
 	if options != nil && options.LabelSelector != nil && !options.LabelSelector.Empty() {
 		sel = options.LabelSelector
 	}
-	return NewVirtualClusterClient(singleton.GetCtrlClient(), config.SecretNamespace, config.VirtualClusterWithControlPlane).List(ctx, client.MatchingLabelsSelector{Selector: sel})
+	return NewVirtualClusterClient(singleton.GetCtrlClient()).List(ctx, client.MatchingLabelsSelector{Selector: sel})
 }
 
 // ConvertToTable convert resource to table
@@ -251,23 +249,6 @@ func NewLocalCluster() *VirtualCluster {
 	cluster.SetName(ClusterLocalName)
 	cluster.Spec.CredentialType = CredentialTypeInternal
 	return cluster
-}
-
-// NewClusterFromSecret extract cluster from cluster secret
-func NewClusterFromSecret(secret *corev1.Secret) (*VirtualCluster, error) {
-	cluster := newVirtualCluster(secret)
-	cluster.Spec.Endpoint = string(secret.Data["endpoint"])
-	if metav1.HasLabel(secret.ObjectMeta, common.LabelKeyClusterEndpointType) {
-		cluster.Spec.Endpoint = secret.GetLabels()[common.LabelKeyClusterEndpointType]
-	}
-	if cluster.Spec.Endpoint == "" {
-		return nil, NewEmptyEndpointClusterSecretError()
-	}
-	if !metav1.HasLabel(secret.ObjectMeta, common.LabelKeyClusterCredentialType) {
-		return nil, NewEmptyCredentialTypeClusterSecretError()
-	}
-	cluster.Spec.CredentialType = CredentialType(secret.GetLabels()[common.LabelKeyClusterCredentialType])
-	return cluster, nil
 }
 
 // NewClusterFromManagedCluster extract cluster from ocm managed cluster

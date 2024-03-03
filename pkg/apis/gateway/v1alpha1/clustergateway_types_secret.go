@@ -50,7 +50,7 @@ func (in *ClusterGateway) Get(ctx context.Context, name string, _ *metav1.GetOpt
 
 	clusterSecret, err := singleton.GetSecretControl().Get(ctx, name)
 	if err != nil {
-		klog.Warningf("Failed getting secret %q/%q: %v", config.SecretNamespace, name, err)
+		klog.Warningf("Failed getting secret %q/%q: %v", name, common.AddonName, err)
 		return nil, err
 	}
 

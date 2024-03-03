@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
-	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/event"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
@@ -122,9 +121,6 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 	if err := c.ensureNamespace(clusterGatewayConfiguration.Spec.InstallNamespace); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required namespace")
 	}
-	if err := c.ensureNamespace(clusterGatewayConfiguration.Spec.SecretNamespace); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required namespace")
-	}
 	if err := c.ensureClusterProxySecrets(clusterGatewayConfiguration); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required proxy client related credentials")
 	}
@@ -160,8 +156,8 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		newServiceAccount(addon, namespace),
 		newClusterGatewayService(addon, namespace),
 		newAuthenticationRole(addon, namespace),
-		newSecretRole(addon, clusterGatewayConfiguration.Spec.SecretNamespace),
-		newSecretRoleBinding(addon, namespace, clusterGatewayConfiguration.Spec.SecretNamespace),
+		newSecretClusterRole(addon),
+		newSecretClusterRoleBinding(addon, namespace),
 		newAPFClusterRole(addon),
 		newAPFClusterRoleBinding(addon, namespace),
 		newAPIService(addon, namespace, caCertData),
@@ -309,80 +305,6 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 				return errors.Wrapf(err, "failed to create managed serviceaccount")
 			}
 		}
-
-		if err := c.copySecretForManagedServiceAccount(
-			clusterAddon,
-			config,
-			addon.Namespace); err != nil {
-			return errors.Wrapf(err, "failed to copy secret from managed serviceaccount")
-		}
-	}
-	return nil
-}
-
-func (c *ClusterGatewayInstaller) copySecretForManagedServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration, clusterName string) error {
-	endpointType := gatewayv1alpha1.ClusterEndpointTypeConst
-	if config.Spec.Egress.Type == configv1alpha1.EgressTypeClusterProxy {
-		endpointType = gatewayv1alpha1.ClusterEndpointTypeClusterProxy
-	}
-	gatewaySecretNamespace := config.Spec.SecretNamespace
-	secretName := config.Spec.SecretManagement.ManagedServiceAccount.Name
-
-	secret, err := c.secretLister.Secrets(clusterName).
-		Get(secretName)
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrapf(err, "failed to get token secret")
-		}
-		return nil
-	}
-	currentSecret, err := c.secretLister.Secrets(gatewaySecretNamespace).Get(clusterName)
-	shouldCreate := false
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return errors.Wrapf(err, "failed to get the cluster secret")
-		}
-		shouldCreate = true
-	}
-	if shouldCreate {
-		if _, err := c.nativeClient.CoreV1().Secrets(gatewaySecretNamespace).
-			Create(context.TODO(),
-				&corev1.Secret{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: gatewaySecretNamespace,
-						Name:      clusterName,
-						Labels: map[string]string{
-							common.LabelKeyClusterCredentialType: string(gatewayv1alpha1.CredentialTypeServiceAccountToken),
-							common.LabelKeyClusterEndpointType:   string(endpointType),
-						},
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: addonv1alpha1.GroupVersion.String(),
-								Kind:       "ClusterManagementAddOn",
-								UID:        addon.UID,
-								Name:       addon.Name,
-							},
-						},
-					},
-					Type: corev1.SecretTypeOpaque,
-					Data: map[string][]byte{
-						corev1.ServiceAccountRootCAKey: secret.Data[corev1.ServiceAccountRootCAKey],
-						corev1.ServiceAccountTokenKey:  secret.Data[corev1.ServiceAccountTokenKey],
-					},
-				},
-				metav1.CreateOptions{}); err != nil {
-			return errors.Wrapf(err, "failed to create the cluster secret")
-		}
-	} else {
-		if bytes.Equal(secret.Data[corev1.ServiceAccountTokenKey], currentSecret.Data[corev1.ServiceAccountTokenKey]) {
-			return nil // no need for an update
-		}
-		currentSecret.Data[corev1.ServiceAccountRootCAKey] = secret.Data[corev1.ServiceAccountRootCAKey]
-		currentSecret.Data[corev1.ServiceAccountTokenKey] = secret.Data[corev1.ServiceAccountTokenKey]
-		if _, err := c.nativeClient.CoreV1().Secrets(gatewaySecretNamespace).
-			Update(context.TODO(), currentSecret, metav1.UpdateOptions{}); err != nil {
-			return errors.Wrapf(err, "failed to update the cluster secret")
-		}
 	}
 	return nil
 }
@@ -413,7 +335,6 @@ const labelKeyClusterGatewayConfigurationGeneration = "config.gateway.open-clust
 func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration) *appsv1.Deployment {
 	args := []string{
 		"--secure-port=9443",
-		"--secret-namespace=" + config.Spec.SecretNamespace,
 		"--ocm-integration=true",
 		"--tls-cert-file=/etc/server/tls.crt",
 		"--tls-private-key-file=/etc/server/tls.key",
@@ -635,11 +556,10 @@ func newAuthenticationRole(addon *addonv1alpha1.ClusterManagementAddOn, namespac
 	}
 }
 
-func newSecretRole(addon *addonv1alpha1.ClusterManagementAddOn, secretNamespace string) *rbacv1.Role {
-	return &rbacv1.Role{
+func newSecretClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.ClusterRole {
+	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: secretNamespace,
-			Name:      "cluster-gateway",
+			Name: "cluster-gateway-credential-reader",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
@@ -651,19 +571,19 @@ func newSecretRole(addon *addonv1alpha1.ClusterManagementAddOn, secretNamespace 
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{""},
-				Resources: []string{"secrets"},
-				Verbs:     []string{"get", "list", "watch", "update"},
+				APIGroups:     []string{""},
+				Resources:     []string{"secrets"},
+				Verbs:         []string{"get", "list", "watch", "update"},
+				ResourceNames: []string{common.AddonName},
 			},
 		},
 	}
 }
 
-func newSecretRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace, secretNamespace string) *rbacv1.RoleBinding {
-	return &rbacv1.RoleBinding{
+func newSecretClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
+	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: secretNamespace,
-			Name:      "cluster-gateway",
+			Name: "cluster-gateway-credential-reader",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
@@ -674,8 +594,8 @@ func newSecretRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
-			Kind: "Role",
-			Name: "cluster-gateway",
+			Kind: "ClusterRole",
+			Name: "cluster-gateway-credential-reader",
 		},
 		Subjects: []rbacv1.Subject{
 			{

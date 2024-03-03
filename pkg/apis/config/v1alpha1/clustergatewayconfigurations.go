@@ -32,8 +32,6 @@ type ClusterGatewayConfigurationSpec struct {
 	// +required
 	Image string `json:"image"`
 	// +required
-	SecretNamespace string `json:"secretNamespace"`
-	// +required
 	InstallNamespace string `json:"installNamespace"`
 	// +required
 	SecretManagement ClusterGatewaySecretManagement `json:"secretManagement"`

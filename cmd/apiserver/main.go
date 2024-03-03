@@ -59,9 +59,6 @@ func main() {
 			return config
 		}, config.WithUserAgent).
 		WithOptionsFns(func(options *builder.ServerOptions) *builder.ServerOptions {
-			if err := config.ValidateSecret(); err != nil {
-				klog.Fatal(err)
-			}
 			if err := config.ValidateClusterProxy(); err != nil {
 				klog.Fatal(err)
 			}
@@ -80,7 +77,6 @@ func main() {
 		klog.Fatal(err)
 	}
 	config.AddLogFlags(cmd.Flags())
-	config.AddSecretFlags(cmd.Flags())
 	config.AddVirtualClusterFlags(cmd.Flags())
 	config.AddClusterProxyFlags(cmd.Flags())
 	config.AddProxyAuthorizationFlags(cmd.Flags())
