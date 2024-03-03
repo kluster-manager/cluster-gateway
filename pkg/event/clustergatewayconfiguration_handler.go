@@ -2,7 +2,6 @@ package event
 
 import (
 	"context"
-
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
@@ -13,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
-	"github.com/kluster-manager/cluster-gateway/pkg/common"
 )
 
 var _ handler.EventHandler = &ClusterGatewayConfigurationHandler{}
@@ -51,16 +49,18 @@ func (c *ClusterGatewayConfigurationHandler) process(ctx context.Context, config
 	}
 
 	for _, addon := range list.Items {
-		if addon.Spec.AddOnConfiguration.CRDName != common.ClusterGatewayConfigurationCRDName {
-			continue
-		}
-		if addon.Spec.AddOnConfiguration.CRName == config.Name {
-			q.Add(reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name: addon.Name,
-				},
-			})
+		for _, ref := range addon.Spec.SupportedConfigs {
+			if ref.ConfigGroupResource.Group != configv1alpha1.GroupVersion.Group ||
+				ref.ConfigGroupResource.Resource != "clustergatewayconfigurations" {
+				continue
+			}
+			if ref.DefaultConfig != nil && ref.DefaultConfig.Name == config.Name {
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name: addon.Name,
+					},
+				})
+			}
 		}
 	}
-
 }

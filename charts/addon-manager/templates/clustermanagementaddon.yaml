@@ -6,6 +6,8 @@ spec:
   addOnMeta:
     displayName: cluster-gateway
     description: cluster-gateway
-  addOnConfiguration:
-    crdName: clustergatewayconfigurations.config.gateway.open-cluster-management.io
-    crName: cluster-gateway
+  supportedConfigs:
+    - group: config.gateway.open-cluster-management.io
+      resource: clustergatewayconfigurations
+      defaultConfig:
+        name: cluster-gateway

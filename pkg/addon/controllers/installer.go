@@ -103,28 +103,37 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		return reconcile.Result{}, nil
 	}
 
-	if addon.Spec.AddOnConfiguration.CRDName != common.ClusterGatewayConfigurationCRDName {
+	var foundConfig bool
+	var clusterGatewayConfiguration configv1alpha1.ClusterGatewayConfiguration
+	for _, ref := range addon.Spec.SupportedConfigs {
+		if ref.ConfigGroupResource.Group != configv1alpha1.GroupVersion.Group ||
+			ref.ConfigGroupResource.Resource != "clustergatewayconfigurations" {
+			continue
+		}
+
+		foundConfig = true
+		if ref.DefaultConfig != nil {
+			if err := c.client.Get(context.TODO(), types.NamespacedName{Name: ref.DefaultConfig.Name}, &clusterGatewayConfiguration); err != nil {
+				if apierrors.IsNotFound(err) {
+					return reconcile.Result{}, fmt.Errorf("no such configuration: %v", ref.DefaultConfig.Name)
+				}
+				return reconcile.Result{}, fmt.Errorf("failed getting configuration: %v", ref.DefaultConfig.Name)
+			}
+			break
+		}
+	}
+	if !foundConfig {
 		// skip
 		return reconcile.Result{}, nil
-	}
-
-	clusterGatewayConfiguration := &configv1alpha1.ClusterGatewayConfiguration{}
-	if err := c.client.Get(ctx, types.NamespacedName{
-		Name: addon.Spec.AddOnConfiguration.CRName,
-	}, clusterGatewayConfiguration); err != nil {
-		if apierrors.IsNotFound(err) {
-			return reconcile.Result{}, fmt.Errorf("no such configuration: %v", addon.Spec.AddOnConfiguration.CRName)
-		}
-		return reconcile.Result{}, fmt.Errorf("failed getting configuration: %v", addon.Spec.AddOnConfiguration.CRName)
 	}
 
 	if err := c.ensureNamespace(clusterGatewayConfiguration.Spec.InstallNamespace); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required namespace")
 	}
-	if err := c.ensureClusterProxySecrets(clusterGatewayConfiguration); err != nil {
+	if err := c.ensureClusterProxySecrets(&clusterGatewayConfiguration); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required proxy client related credentials")
 	}
-	if err := c.ensureSecretManagement(addon, clusterGatewayConfiguration); err != nil {
+	if err := c.ensureSecretManagement(addon, &clusterGatewayConfiguration); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to configure secret management")
 	}
 
@@ -170,7 +179,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		}
 	}
 
-	if err := c.ensureClusterGatewayDeployment(addon, clusterGatewayConfiguration); err != nil {
+	if err := c.ensureClusterGatewayDeployment(addon, &clusterGatewayConfiguration); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed ensuring cluster-gateway deployment")
 	}
 
