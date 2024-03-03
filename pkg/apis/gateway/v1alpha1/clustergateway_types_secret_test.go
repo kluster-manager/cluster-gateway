@@ -6,7 +6,6 @@ import (
 
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
-	"github.com/kluster-manager/cluster-gateway/pkg/options"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
@@ -387,7 +386,7 @@ func TestConvertSecretAndClusterToGateway(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			gw, err := convertFromManagedClusterAndSecret(c.inputCluster, c.inputSecret)
+			gw, err := convert(c.inputCluster, c.inputSecret)
 			if c.expectedFailure {
 				assert.True(t, err != nil)
 				return
@@ -396,61 +395,6 @@ func TestConvertSecretAndClusterToGateway(t *testing.T) {
 			assert.Equal(t, c.expected, gw)
 		})
 	}
-}
-
-func TestGetClusterGateway(t *testing.T) {
-	options.OCMIntegration = false
-	input := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testNamespace,
-			Name:      testName,
-			Labels: map[string]string{
-				common.LabelKeyClusterCredentialType: string(CredentialTypeServiceAccountToken),
-			},
-		},
-		Data: map[string][]byte{
-			"ca.crt":   []byte(testCAData),
-			"token":    []byte(testToken),
-			"endpoint": []byte(testEndpoint),
-		},
-	}
-	fakeKubeClient := fake.NewSimpleClientset(input)
-	singleton.SetSecretControl(cert.NewDirectApiSecretControl(fakeKubeClient))
-	expected, err := convertFromSecret(input)
-	storage := &ClusterGateway{}
-	gwRaw, err := storage.Get(context.TODO(), testName, &metav1.GetOptions{})
-	assert.NoError(t, err)
-	assert.Equal(t, expected, gwRaw)
-}
-
-func TestListClusterGateway(t *testing.T) {
-	options.OCMIntegration = false
-	input := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testNamespace,
-			Name:      testName,
-			Labels: map[string]string{
-				common.LabelKeyClusterCredentialType: string(CredentialTypeX509Certificate),
-			},
-		},
-		Data: map[string][]byte{
-			"ca.crt":   []byte(testCAData),
-			"tls.crt":  []byte(testCertData),
-			"tls.key":  []byte(testKeyData),
-			"endpoint": []byte(testEndpoint),
-		},
-	}
-	fakeKubeClient := fake.NewSimpleClientset(input)
-	singleton.SetSecretControl(cert.NewDirectApiSecretControl(fakeKubeClient))
-
-	storage := &ClusterGateway{}
-	gws, err := storage.List(context.TODO(), &internalversion.ListOptions{})
-	require.Equal(t, 1, len(gws.(*ClusterGatewayList).Items))
-	assert.NoError(t, err)
-	expected, err := convertFromSecret(input)
-	assert.NoError(t, err)
-	gw := gws.(*ClusterGatewayList).Items[0]
-	assert.Equal(t, expected, &gw)
 }
 
 func TestListHybridClusterGateway(t *testing.T) {

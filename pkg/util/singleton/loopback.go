@@ -1,155 +1,61 @@
 package singleton
 
 import (
-	"context"
-	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/kluster-manager/cluster-gateway/pkg/common"
+	"github.com/pkg/errors"
+	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/server"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	corev1informer "k8s.io/client-go/informers/core/v1"
-	"k8s.io/client-go/kubernetes"
-	corev1lister "k8s.io/client-go/listers/core/v1"
-	clientgorest "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
-	ocmclient "open-cluster-management.io/api/client/cluster/clientset/versioned"
-	clusterinformers "open-cluster-management.io/api/client/cluster/informers/externalversions"
-	clusterv1Lister "open-cluster-management.io/api/client/cluster/listers/cluster/v1"
-	"sigs.k8s.io/apiserver-runtime/pkg/util/loopback"
+	"k8s.io/klog/v2/klogr"
+	cu "kmodules.xyz/client-go/client"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	controllerruntimeconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
-
-	"github.com/kluster-manager/cluster-gateway/pkg/common"
-	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
-	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
-	clusterutil "github.com/kluster-manager/cluster-gateway/pkg/util/cluster"
-	"github.com/kluster-manager/cluster-gateway/pkg/util/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
-var kubeClient kubernetes.Interface
-var ocmClient ocmclient.Interface
-var ctrlClient client.Client
+var kc client.Client
 
-var secretInformer cache.SharedIndexInformer
-var secretLister corev1lister.SecretLister
-
-var secretControl cert.SecretControl
-
-var clusterInformer cache.SharedIndexInformer
-var clusterLister clusterv1Lister.ManagedClusterLister
-var clusterControl clusterutil.OCMClusterControl
-
-func GetSecretControl() cert.SecretControl {
-	return secretControl
+func GetClient() client.Client {
+	return kc
 }
 
-func GetOCMClient() ocmclient.Interface {
-	return ocmClient
+func SetClientForTesting(cc client.Client) {
+	kc = cc
 }
 
-func GetKubeClient() kubernetes.Interface {
-	return kubeClient
-}
+func InitManager(scheme *runtime.Scheme) server.PostStartHookFunc {
+	return func(ctx server.PostStartHookContext) error {
+		log.SetLogger(klogr.New()) // nolint:staticcheck
 
-func GetCtrlClient() client.Client {
-	return ctrlClient
-}
-
-func SetCtrlClient(cli client.Client) {
-	ctrlClient = cli
-}
-
-func InitLoopbackClient(ctx server.PostStartHookContext) error {
-	var err error
-	cfg := loopback.GetLoopbackMasterClientConfig()
-	if cfg == nil {
-		if cfg, err = controllerruntimeconfig.GetConfig(); err != nil {
-			return err
-		}
-	}
-	copiedCfg := clientgorest.CopyConfig(cfg)
-	copiedCfg.RateLimiter = nil
-	kubeClient, err = kubernetes.NewForConfig(copiedCfg)
-	if err != nil {
-		return err
-	}
-	ocmClient, err = ocmclient.NewForConfig(copiedCfg)
-	if err != nil {
-		return err
-	}
-	ctrlClient, err = client.New(copiedCfg, client.Options{Scheme: scheme.Scheme})
-	if err != nil {
-		return err
-	}
-	if utilfeature.DefaultMutableFeatureGate.Enabled(featuregates.SecretCache) {
-		if err := setInformer(kubeClient, ctx.StopCh); err != nil {
-			return err
-		}
-		secretControl = cert.NewCachedSecretControl(secretLister)
-	}
-	if secretControl == nil {
-		secretControl = cert.NewDirectApiSecretControl(kubeClient)
-	}
-
-	if utilfeature.DefaultMutableFeatureGate.Enabled(featuregates.OCMClusterCache) {
-		installed, err := clusterutil.IsOCMManagedClusterInstalled(ocmClient)
+		cfg, err := ctrl.GetConfig()
 		if err != nil {
-			klog.Error(err)
-		} else if !installed {
-			klog.Infof("OCM ManagedCluster CRD not installed, skip bootstrapping informer for OCM ManagedCluster")
-		} else if err := setOCMClusterInformer(ocmClient, ctx.StopCh); err != nil {
-			return err
+			return errors.Wrap(err, "failed ctrl.GetConfig()")
 		}
-		clusterControl = clusterutil.NewCacheOCMClusterControl(clusterLister)
+
+		mgr, err := manager.New(cfg, manager.Options{
+			Scheme:                 scheme,
+			Metrics:                metricsserver.Options{BindAddress: ""},
+			HealthProbeBindAddress: "",
+			LeaderElection:         false,
+			LeaderElectionID:       "5b87adeb-hub.proxyserver.licenses.appscode.com",
+			NewClient:              cu.NewClient,
+			Cache: cache.Options{
+				ByObject: map[client.Object]cache.ByObject{
+					&core.Secret{}: {
+						Field: fields.OneTermEqualSelector("metadata.name", common.AddonName),
+					},
+				},
+			},
+		})
+		if err != nil {
+			return errors.Wrap(err, "unable to start manager")
+		}
+		kc = mgr.GetClient()
+		return mgr.Start(wait.ContextForChannel(ctx.StopCh))
 	}
-	if clusterControl == nil {
-		clusterControl = clusterutil.NewDirectOCMClusterControl(ocmClient)
-	}
-
-	return nil
-}
-
-func setInformer(k kubernetes.Interface, stopCh <-chan struct{}) error {
-	secretInformer = corev1informer.NewFilteredSecretInformer(k, metav1.NamespaceAll, 0, cache.Indexers{
-		cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
-	}, func(opts *metav1.ListOptions) {
-		opts.FieldSelector = fields.OneTermEqualSelector("metadata.name", common.AddonName).String()
-	})
-	secretLister = corev1lister.NewSecretLister(secretInformer.GetIndexer())
-	go secretInformer.Run(stopCh)
-	return wait.PollImmediateUntilWithContext(wait.ContextForChannel(stopCh), time.Second, func(ctx context.Context) (done bool, err error) {
-		return secretInformer.HasSynced(), nil
-	})
-}
-
-// SetSecretControl is for test only
-func SetSecretControl(ctrl cert.SecretControl) {
-	secretControl = ctrl
-}
-
-// SetOCMClient is for test only
-func SetOCMClient(c ocmclient.Interface) {
-	ocmClient = c
-}
-
-// SetKubeClient is for test only
-func SetKubeClient(k kubernetes.Interface) {
-	kubeClient = k
-}
-
-func setOCMClusterInformer(c ocmclient.Interface, stopCh <-chan struct{}) error {
-	ocmClusterInformers := clusterinformers.NewSharedInformerFactory(c, 0)
-	clusterInformer = ocmClusterInformers.Cluster().V1().ManagedClusters().Informer()
-	clusterLister = ocmClusterInformers.Cluster().V1().ManagedClusters().Lister()
-	go clusterInformer.Run(stopCh)
-	return wait.PollImmediateUntilWithContext(wait.ContextForChannel(stopCh), time.Second, func(ctx context.Context) (done bool, err error) {
-		return clusterInformer.HasSynced(), nil
-	})
-}
-
-func GetClusterControl() clusterutil.OCMClusterControl {
-	return clusterControl
 }

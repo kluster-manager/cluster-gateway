@@ -4,15 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
-
-	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/utils/pointer"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
-	"github.com/kluster-manager/cluster-gateway/pkg/options"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
 	"github.com/pkg/errors"
@@ -22,9 +17,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apiserver/pkg/registry/rest"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
+	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 )
 
@@ -38,34 +37,34 @@ var _ rest.Lister = &ClusterGateway{}
 //
 // NOTE: Because the secret resource is designed to have no "metadata.generation" field,
 // the ClusterGateway resource also misses the generation tracking.
-const (
-	AnnotationKeyClusterGatewayStatusHealthy       = "status.gateway.open-cluster-management.io/healthy"
-	AnnotationKeyClusterGatewayStatusHealthyReason = "status.gateway.open-cluster-management.io/healthy-reason"
-)
 
 func (in *ClusterGateway) Get(ctx context.Context, name string, _ *metav1.GetOptions) (runtime.Object, error) {
-	if singleton.GetSecretControl() == nil {
-		return nil, fmt.Errorf("loopback secret client are not inited")
+	if singleton.GetClient() == nil {
+		return nil, fmt.Errorf("controller manager is not initialized yet")
 	}
 
-	clusterSecret, err := singleton.GetSecretControl().Get(ctx, name)
+	var cluster clusterv1.ManagedCluster
+	err := singleton.GetClient().Get(ctx, types.NamespacedName{Name: name}, &cluster)
 	if err != nil {
-		klog.Warningf("Failed getting secret %q/%q: %v", name, common.AddonName, err)
 		return nil, err
 	}
 
-	if options.OCMIntegration {
-		if singleton.GetClusterControl() == nil {
-			return nil, fmt.Errorf("loopback cluster client are not inited")
-		}
-		managedCluster, err := singleton.GetClusterControl().Get(ctx, name)
-		if err != nil {
-			return convertFromSecret(clusterSecret)
-		}
-		return convertFromManagedClusterAndSecret(managedCluster, clusterSecret)
+	var gwAddon addonv1alpha1.ManagedClusterAddOn
+	err = singleton.GetClient().Get(ctx, types.NamespacedName{Name: common.AddonName, Namespace: cluster.Name}, &gwAddon)
+	if err != nil {
+		return nil, err
 	}
 
-	return convertFromSecret(clusterSecret)
+	endpointType := getClusterEndpointType(ctx, cluster.Name)
+
+	var secret v1.Secret
+	err = singleton.GetClient().Get(ctx, types.NamespacedName{Name: common.AddonName, Namespace: cluster.Name}, &secret)
+	if err != nil {
+		klog.Warningf("Failed getting secret %q/%q: %v", cluster.Name, common.AddonName, err)
+		return nil, err
+	}
+
+	return convert(&cluster, &gwAddon, endpointType, &secret)
 }
 
 func (in *ClusterGateway) List(ctx context.Context, opt *internalversion.ListOptions) (runtime.Object, error) {
@@ -73,48 +72,39 @@ func (in *ClusterGateway) List(ctx context.Context, opt *internalversion.ListOpt
 		// TODO: convert watch events from both Secret and ManagedCluster
 		return nil, fmt.Errorf("watch not supported")
 	}
-	clusterSecrets, err := singleton.GetSecretControl().List(ctx)
-	if err != nil {
-		return nil, err
-	}
+
 	list := &ClusterGatewayList{
 		Items: []ClusterGateway{},
 	}
 
-	if options.OCMIntegration {
-		clusters, err := singleton.GetClusterControl().List(ctx)
-		if err != nil {
-			return nil, err
-		}
-		clustersByName := make(map[string]*clusterv1.ManagedCluster)
-		for _, cluster := range clusters {
-			clustersByName[cluster.Name] = cluster
-		}
-
-		for _, secret := range clusterSecrets {
-			if cluster, ok := clustersByName[secret.Name]; ok {
-				gw, err := convertFromManagedClusterAndSecret(cluster, secret)
-				if err != nil {
-					klog.Warningf("skipping %v: failed converting clustergateway resource", secret.Name)
-					continue
-				}
-				list.Items = append(list.Items, *gw)
-			} else {
-				gw, err := convertFromSecret(secret)
-				if err != nil {
-					klog.Warningf("skipping %v: failed converting clustergateway resource", secret.Name)
-					continue
-				}
-				list.Items = append(list.Items, *gw)
-			}
-		}
-		return list, nil
+	var clusters clusterv1.ManagedClusterList
+	err := singleton.GetClient().List(ctx, &clusters)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, secret := range clusterSecrets {
-		gw, err := convertFromSecret(secret)
+	for _, cluster := range clusters.Items {
+		var gwAddon addonv1alpha1.ManagedClusterAddOn
+		err := singleton.GetClient().Get(ctx, types.NamespacedName{Name: common.AddonName, Namespace: cluster.Name}, &gwAddon)
+		if apierrors.IsNotFound(err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+
+		endpointType := getClusterEndpointType(ctx, cluster.Name)
+
+		var secret v1.Secret
+		err = singleton.GetClient().Get(ctx, types.NamespacedName{Name: common.AddonName, Namespace: cluster.Name}, &secret)
+		if apierrors.IsNotFound(err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+
+		gw, err := convert(&cluster, &gwAddon, endpointType, &secret)
 		if err != nil {
-			klog.Errorf("failed converting secret to gateway: %v", err)
+			klog.Warningf("skipping %v: failed converting clustergateway resource", secret.Name)
 			continue
 		}
 		list.Items = append(list.Items, *gw)
@@ -133,47 +123,38 @@ func (in *ClusterGateway) ConvertToTable(ctx context.Context, object runtime.Obj
 	}
 }
 
-func convertFromSecret(clusterSecret *v1.Secret) (*ClusterGateway, error) {
-	caData, endpoint, err := getEndpointFromSecret(clusterSecret)
-	if err != nil {
-		return nil, err
+func getClusterEndpointType(ctx context.Context, clusterName string) ClusterEndpointType {
+	endpointType := ClusterEndpointTypeConst
+	if config.ClusterProxyHost != "" {
+		var proxyAddon addonv1alpha1.ManagedClusterAddOn
+		err := singleton.GetClient().Get(ctx, types.NamespacedName{Name: "cluster-proxy", Namespace: clusterName}, &proxyAddon)
+		if err == nil {
+			for _, cond := range proxyAddon.Status.Conditions {
+				if cond.Type == "Available" && cond.Status == metav1.ConditionTrue {
+					endpointType = ClusterEndpointTypeClusterProxy
+					break
+				}
+			}
+		}
 	}
-	return convert(caData, endpoint, caData == nil, clusterSecret)
+	return endpointType
 }
 
-func convertFromManagedClusterAndSecret(managedCluster *clusterv1.ManagedCluster, clusterSecret *v1.Secret) (*ClusterGateway, error) {
-	caData, endpoint, err := getEndpointFromManagedCluster(managedCluster)
-	if err != nil {
-		return nil, err
-	}
-	return convert(caData, endpoint, false, clusterSecret)
-}
-
-func getEndpointFromManagedCluster(managedCluster *clusterv1.ManagedCluster) ([]byte, string, error) {
-	if len(managedCluster.Spec.ManagedClusterClientConfigs) == 0 {
+func getEndpointFromManagedCluster(cluster *clusterv1.ManagedCluster) ([]byte, string, error) {
+	if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
 		return nil, "", nil
 	}
-	cfg := managedCluster.Spec.ManagedClusterClientConfigs[0]
+	cfg := cluster.Spec.ManagedClusterClientConfigs[0]
 	return cfg.CABundle, cfg.URL, nil
 }
 
-func getEndpointFromSecret(secret *v1.Secret) ([]byte, string, error) {
-	endpoint := secret.Data["endpoint"]
-	endpointStr := string(endpoint)
-	endpointStr = strings.TrimSuffix(endpointStr, "\n")
-
-	var caData []byte = nil
-	if caCrt, ok := secret.Data["ca.crt"]; ok {
-		caData = caCrt
-	} else if ca, ok := secret.Data["ca"]; ok {
-		caData = ca
-	} else {
-		caData = nil
+func convert(cluster *clusterv1.ManagedCluster, gwAddon *addonv1alpha1.ManagedClusterAddOn, endpointType ClusterEndpointType, secret *v1.Secret) (*ClusterGateway, error) {
+	caData, apiServerEndpoint, err := getEndpointFromManagedCluster(cluster)
+	if err != nil {
+		return nil, err
 	}
-	return caData, endpointStr, nil
-}
+	insecure := len(caData) == 0
 
-func convert(caData []byte, apiServerEndpoint string, insecure bool, secret *v1.Secret) (*ClusterGateway, error) {
 	c := &ClusterGateway{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: secret.Name,
@@ -185,18 +166,14 @@ func convert(caData []byte, apiServerEndpoint string, insecure bool, secret *v1.
 	}
 
 	// converting endpoint
-	endpointType, ok := secret.Labels[common.LabelKeyClusterEndpointType]
-	if !ok {
-		endpointType = string(ClusterEndpointTypeConst)
-	}
 	var proxyURL *string
-	if url, useProxy := secret.Data["proxy-url"]; useProxy && len(url) > 0 {
+	if url, useProxy := gwAddon.Annotations["proxy-url"]; useProxy && len(url) > 0 {
 		proxyURL = pointer.String(string(url))
 	}
-	switch ClusterEndpointType(endpointType) {
+	switch endpointType {
 	case ClusterEndpointTypeClusterProxy:
 		c.Spec.Access.Endpoint = &ClusterEndpoint{
-			Type: ClusterEndpointType(endpointType),
+			Type: endpointType,
 		}
 	case ClusterEndpointTypeConst:
 		fallthrough // backward compatibility
@@ -206,7 +183,7 @@ func convert(caData []byte, apiServerEndpoint string, insecure bool, secret *v1.
 		}
 		if insecure {
 			c.Spec.Access.Endpoint = &ClusterEndpoint{
-				Type: ClusterEndpointType(endpointType),
+				Type: endpointType,
 				Const: &ClusterEndpointConst{
 					Address:  apiServerEndpoint,
 					Insecure: &insecure,
@@ -215,7 +192,7 @@ func convert(caData []byte, apiServerEndpoint string, insecure bool, secret *v1.
 			}
 		} else {
 			c.Spec.Access.Endpoint = &ClusterEndpoint{
-				Type: ClusterEndpointType(endpointType),
+				Type: endpointType,
 				Const: &ClusterEndpointConst{
 					Address:  apiServerEndpoint,
 					CABundle: caData,
@@ -228,10 +205,13 @@ func convert(caData []byte, apiServerEndpoint string, insecure bool, secret *v1.
 	// converting credential
 	credentialType, ok := secret.Labels[common.LabelKeyClusterCredentialType]
 	if !ok {
-		return nil, apierrors.NewNotFound(schema.GroupResource{
-			Group:    config.MetaApiGroupName,
-			Resource: config.MetaApiResourceName,
-		}, secret.Name)
+		if secret.Labels[common.LabelKeyIsManagedServiceAccount] != "true" {
+			return nil, apierrors.NewNotFound(schema.GroupResource{
+				Group:    config.MetaApiGroupName,
+				Resource: config.MetaApiResourceName,
+			}, secret.Name)
+		}
+		credentialType = string(CredentialTypeServiceAccountToken)
 	}
 	switch CredentialType(credentialType) {
 	case CredentialTypeX509Certificate:
@@ -252,20 +232,20 @@ func convert(caData []byte, apiServerEndpoint string, insecure bool, secret *v1.
 	}
 
 	if utilfeature.DefaultMutableFeatureGate.Enabled(featuregates.HealthinessCheck) {
-		if healthyRaw, ok := secret.Annotations[AnnotationKeyClusterGatewayStatusHealthy]; ok {
+		if healthyRaw, ok := gwAddon.Annotations[common.AnnotationKeyClusterGatewayStatusHealthy]; ok {
 			healthy, err := strconv.ParseBool(healthyRaw)
 			if err != nil {
 				return nil, fmt.Errorf("unrecogized healthiness status: %v", healthyRaw)
 			}
 			c.Status.Healthy = healthy
 		}
-		if healthyReason, ok := secret.Annotations[AnnotationKeyClusterGatewayStatusHealthyReason]; ok {
+		if healthyReason, ok := gwAddon.Annotations[common.AnnotationKeyClusterGatewayStatusHealthyReason]; ok {
 			c.Status.HealthyReason = HealthyReasonType(healthyReason)
 		}
 	}
 
 	if utilfeature.DefaultMutableFeatureGate.Enabled(featuregates.ClientIdentityPenetration) {
-		if proxyConfigRaw, ok := secret.Annotations[AnnotationClusterGatewayProxyConfiguration]; ok {
+		if proxyConfigRaw, ok := gwAddon.Annotations[AnnotationClusterGatewayProxyConfiguration]; ok {
 			proxyConfig := &ClusterGatewayProxyConfiguration{}
 			if err := yaml.Unmarshal([]byte(proxyConfigRaw), proxyConfig); err == nil {
 				for _, rule := range proxyConfig.Spec.Rules {

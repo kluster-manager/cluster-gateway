@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/addon/agent"
 	"github.com/kluster-manager/cluster-gateway/pkg/addon/controllers"
@@ -58,8 +59,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "cluster-gateway-addon-manager",

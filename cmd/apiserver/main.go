@@ -17,24 +17,38 @@ package main
 import (
 	"net/http"
 
+	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
+	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/config"
+	_ "github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/metrics"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
+
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/server"
-	"k8s.io/klog/v2"
-	"sigs.k8s.io/apiserver-runtime/pkg/builder"
-
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
-
-	"github.com/kluster-manager/cluster-gateway/pkg/config"
-	"github.com/kluster-manager/cluster-gateway/pkg/metrics"
-	"github.com/kluster-manager/cluster-gateway/pkg/options"
-	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
-
-	// +kubebuilder:scaffold:resource-imports
-	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
-
-	_ "github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/klog/v2"
+	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+	"sigs.k8s.io/apiserver-runtime/pkg/builder"
 )
+
+var (
+	scheme = runtime.NewScheme()
+)
+
+func init() {
+	clientgoscheme.AddToScheme(scheme)
+	clusterv1.Install(scheme)
+	addonv1alpha1.Install(scheme)
+	ocmauthv1beta1.AddToScheme(scheme)
+	gatewayv1alpha1.AddToScheme(scheme)
+	configv1alpha1.AddToScheme(scheme)
+}
 
 func main() {
 
@@ -44,8 +58,7 @@ func main() {
 	cmd, err := builder.APIServer.
 		// +kubebuilder:scaffold:resource-register
 		WithResource(&gatewayv1alpha1.ClusterGateway{}).
-		WithResource(&gatewayv1alpha1.VirtualCluster{}).
-		WithLocalDebugExtension().
+		WithLocalDebugExtension().WithAdditionalSchemesToBuild().
 		ExposeLoopbackMasterClientConfig().
 		ExposeLoopbackAuthorizer().
 		WithoutEtcd().
@@ -71,20 +84,16 @@ func main() {
 			server.Handler.FullHandlerChain = gatewayv1alpha1.NewClusterGatewayProxyRequestEscaper(server.Handler.FullHandlerChain)
 			return server
 		}).
-		WithPostStartHook("init-master-loopback-client", singleton.InitLoopbackClient).
+		WithPostStartHook("init-controller-manager", singleton.InitManager(scheme)).
 		Build()
 	if err != nil {
 		klog.Fatal(err)
 	}
 	config.AddLogFlags(cmd.Flags())
-	config.AddVirtualClusterFlags(cmd.Flags())
 	config.AddClusterProxyFlags(cmd.Flags())
 	config.AddProxyAuthorizationFlags(cmd.Flags())
 	config.AddUserAgentFlags(cmd.Flags())
 	config.AddClusterGatewayProxyConfig(cmd.Flags())
-	cmd.Flags().BoolVarP(&options.OCMIntegration, "ocm-integration", "", false,
-		"Enabling OCM integration, reading cluster CA and api endpoint from managed "+
-			"cluster.")
 	if err := cmd.Execute(); err != nil {
 		klog.Fatal(err)
 	}

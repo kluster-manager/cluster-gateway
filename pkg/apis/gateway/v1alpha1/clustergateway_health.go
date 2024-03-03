@@ -8,11 +8,17 @@ import (
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
+	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/registry/rest"
+	"k8s.io/klog/v2"
+	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	contextutil "sigs.k8s.io/apiserver-runtime/pkg/util/context"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ resource.ArbitrarySubResource = &ClusterGatewayHealth{}
@@ -45,32 +51,50 @@ func (in *ClusterGatewayHealth) Get(ctx context.Context, name string, options *m
 }
 
 func (in *ClusterGatewayHealth) Update(ctx context.Context, name string, objInfo rest.UpdatedObjectInfo, createValidation rest.ValidateObjectFunc, updateValidation rest.ValidateObjectUpdateFunc, forceAllowCreate bool, options *metav1.UpdateOptions) (runtime.Object, bool, error) {
-	if singleton.GetSecretControl() == nil {
-		return nil, false, fmt.Errorf("loopback clients are not inited")
+	if singleton.GetClient() == nil {
+		return nil, false, fmt.Errorf("controller manager is not initialized yet")
 	}
 
-	latestSecret, err := singleton.GetSecretControl().Get(ctx, common.AddonName)
-	if err != nil {
-		return nil, false, err
-	}
 	updating, err := objInfo.UpdatedObject(ctx, nil)
 	if err != nil {
 		return nil, false, err
 	}
 	updatingClusterGateway := updating.(*ClusterGateway)
-	if latestSecret.Annotations == nil {
-		latestSecret.Annotations = make(map[string]string)
-	}
-	latestSecret.Annotations[AnnotationKeyClusterGatewayStatusHealthy] = strconv.FormatBool(updatingClusterGateway.Status.Healthy)
-	latestSecret.Annotations[AnnotationKeyClusterGatewayStatusHealthyReason] = string(updatingClusterGateway.Status.HealthyReason)
-	updated, err := singleton.GetKubeClient().
-		CoreV1().
-		Secrets(name).
-		Update(ctx, latestSecret, metav1.UpdateOptions{})
+
+	var gwAddon addonv1alpha1.ManagedClusterAddOn
+	err = singleton.GetClient().Get(ctx, types.NamespacedName{Name: common.AddonName, Namespace: name}, &gwAddon)
 	if err != nil {
 		return nil, false, err
 	}
-	clusterGateway, err := convertFromSecret(updated)
+	mod := gwAddon.DeepCopy()
+	if mod.Annotations == nil {
+		mod.Annotations = make(map[string]string)
+	}
+	mod.Annotations[common.AnnotationKeyClusterGatewayStatusHealthy] = strconv.FormatBool(updatingClusterGateway.Status.Healthy)
+	mod.Annotations[common.AnnotationKeyClusterGatewayStatusHealthyReason] = string(updatingClusterGateway.Status.HealthyReason)
+
+	patch := client.MergeFrom(&gwAddon)
+	err = singleton.GetClient().Patch(ctx, mod, patch)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var cluster clusterv1.ManagedCluster
+	err = singleton.GetClient().Get(ctx, types.NamespacedName{Name: name}, &cluster)
+	if err != nil {
+		return nil, false, err
+	}
+
+	endpointType := getClusterEndpointType(ctx, cluster.Name)
+
+	var secret core.Secret
+	err = singleton.GetClient().Get(ctx, types.NamespacedName{Name: common.AddonName, Namespace: cluster.Name}, &secret)
+	if err != nil {
+		klog.Warningf("Failed getting secret %q/%q: %v", cluster.Name, common.AddonName, err)
+		return nil, false, err
+	}
+
+	clusterGateway, err := convert(&cluster, &gwAddon, endpointType, &secret)
 	if err != nil {
 		return nil, false, err
 	}

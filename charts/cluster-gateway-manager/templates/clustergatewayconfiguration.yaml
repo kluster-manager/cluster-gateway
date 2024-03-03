@@ -14,8 +14,7 @@ spec:
       name: cluster-gateway
   {{ end }}
   egress:
-  {{ if .Values.konnectivityEgress }}
-    type: ClusterProxy
+  {{ if .Values.clusterProxy.enabled }}
     clusterProxy:
       proxyServerHost: "proxy-entrypoint.open-cluster-management-addon"
       proxyServerPort: 8090
@@ -23,6 +22,4 @@ spec:
         namespace: open-cluster-management-addon
         proxyClientCASecretName: proxy-server-ca
         proxyClientSecretName: proxy-client
-  {{ else }}
-    type: Direct
   {{ end }}
