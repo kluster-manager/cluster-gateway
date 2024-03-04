@@ -256,6 +256,7 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 	if p.impersonate || utilfeature.DefaultFeatureGate.Enabled(featuregates.ClientIdentityPenetration) {
 		cfg.Impersonate = p.getImpersonationConfig(request)
 	}
+
 	rt, err := restclient.TransportFor(cfg)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
@@ -354,6 +355,11 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 	if matched {
 		klog.Infof("identity exchanged with rule `%s` in the proxy config from global config", ruleName)
 		return *projected
+	}
+
+	// don't impersonate service accounts
+	if strings.HasPrefix(user.GetName(), "system:serviceaccount:") {
+		return restclient.ImpersonationConfig{}
 	}
 	return restclient.ImpersonationConfig{
 		UserName: user.GetName(),

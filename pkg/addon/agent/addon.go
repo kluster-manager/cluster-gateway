@@ -105,11 +105,17 @@ func buildClusterGatewayOutboundPermission(serviceAccountNamespace, serviceAccou
 		ObjectMeta: metav1.ObjectMeta{
 			Name: clusterRoleName,
 		},
+		// https://kubernetes.io/docs/reference/access-authn-authz/authentication/#user-impersonation
+		// Do NOT impersonate service accounts because it does not make sense
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{"*"},
-				Verbs:     []string{"*"},
-				Resources: []string{"*"},
+				APIGroups: []string{""},
+				Resources: []string{"users", "groups"},
+				Verbs:     []string{"impersonate"},
+			},
+			{
+				NonResourceURLs: []string{"/healthz"},
+				Verbs:           []string{"get"},
 			},
 		},
 	}
