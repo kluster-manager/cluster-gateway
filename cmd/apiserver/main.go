@@ -22,6 +22,7 @@ import (
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 	_ "github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/generated/openapi"
 	"github.com/kluster-manager/cluster-gateway/pkg/metrics"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
@@ -106,6 +107,7 @@ func main() {
 				}
 				return config
 			}).
+		WithOpenAPIDefinitions(common.AddonName, "v0.0.1", openapi.GetOpenAPIDefinitions).
 		WithOptionsFns(func(options *builder.ServerOptions) *builder.ServerOptions {
 			if err := config.ValidateClusterProxy(); err != nil {
 				klog.Fatal(err)
