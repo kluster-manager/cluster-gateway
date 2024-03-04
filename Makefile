@@ -126,7 +126,7 @@ gateway:
 		.
 
 ocm-addon-manager:
-	docker build -t $(IMAGE_REGISTRY_NAME)/cluster-gateway-addon-manager:${IMG_TAG} \
+	docker build -t $(IMAGE_REGISTRY_NAME)/cluster-gateway-manager:${IMG_TAG} \
 		--build-arg OS=${OS} \
 		--build-arg ARCH=${ARCH} \
 		-f cmd/addon-manager/Dockerfile \

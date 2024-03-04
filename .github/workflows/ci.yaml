@@ -96,7 +96,7 @@ jobs:
       - name: Build Image
         run: |
           make image
-          kind load docker-image oamdev/cluster-gateway:latest --name chart-testing
+          kind load docker-image ghcr.io/kluster-manager/cluster-gateway:latest --name chart-testing
       - name: Prepare ClusterGateway E2E Environment
         run: |
           helm install --create-namespace -n vela-system \
@@ -143,8 +143,8 @@ jobs:
       - name: Build image
         run: |
           make image
-          kind load docker-image oamdev/cluster-gateway:latest  --name chart-testing
-          kind load docker-image oamdev/cluster-gateway-addon-manager:latest  --name chart-testing
+          kind load docker-image ghcr.io/kluster-manager/cluster-gateway:latest  --name chart-testing
+          kind load docker-image ghcr.io/kluster-manager/cluster-gateway-manager:latest  --name chart-testing
       - name: Install latest cluster-gateway
         run: |
           helm install --create-namespace -n open-cluster-management-addon \
