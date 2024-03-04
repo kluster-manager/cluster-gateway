@@ -3,7 +3,7 @@ kind: ClusterGatewayConfiguration
 metadata:
   name: cluster-gateway
 spec:
-  image: oamdev/cluster-gateway:v1.1.6.ocm
+  image: ghcr.io/kluster-manager/cluster-gateway:v1.1.6.ocm
   installNamespace: open-cluster-management-addon
   secretNamespace: open-cluster-management-credentials
   egress:

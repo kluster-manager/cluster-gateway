@@ -1,14 +1,15 @@
 # Image of the cluster-gateway instances
 image: ghcr.io/kluster-manager/cluster-gateway-manager
 
-tag:
+tag: latest
 
 clusterGateway:
   image: ghcr.io/kluster-manager/cluster-gateway
   installNamespace: cluster-gateway
+
 # Number of replicas
 replicas: 1
 
 manualSecretManagement: false
 clusterProxy:
-  enabled: false
+  enabled: true

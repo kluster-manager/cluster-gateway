@@ -31,7 +31,7 @@ api-gateway solution:
 ## Image
 
 ```shell
-$ docker pull oamdev/cluster-gateway:v1.1.12 # Or other newer tags
+$ docker pull ghcr.io/kluster-manager/cluster-gateway:v1.1.12 # Or other newer tags
 ```
 
 ## Documentation
@@ -110,7 +110,7 @@ cluster-gateway into sustainable production environment:
   discovery.
 
 In order to fill the blanks in cluster-gateway above, optionally we can delegate
-the management of cluster-gateway to OCM by introducing a new component named [cluster-gateway-addon-manager](https://github.com/kluster-manager/cluster-gateway/tree/master/cmd/addon-manager)
+the management of cluster-gateway to OCM by introducing a new component named [cluster-gateway-manager](https://github.com/kluster-manager/cluster-gateway/tree/master/cmd/addon-manager)
 to the hosting cluster which is basically responsible for:
 
 1. Sustainable installation as a typical "operator" dedicated for

@@ -23,8 +23,8 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            oamdev/cluster-gateway
-            ghcr.io/oam-dev/cluster-gateway
+            ghcr.io/kluster-manager/cluster-gateway
+            ghcr.io/kluster-manager/cluster-gateway
           tags: |
             type=ref,event=branch
             type=ref,event=tag
