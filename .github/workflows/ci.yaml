@@ -99,7 +99,7 @@ jobs:
           kind load docker-image ghcr.io/kluster-manager/cluster-gateway:latest --name chart-testing
       - name: Prepare ClusterGateway E2E Environment
         run: |
-          helm install --create-namespace -n vela-system \
+          helm install --create-namespace -n cluster-gateway \
             cluster-gateway ./charts/cluster-gateway \
             --set featureGate.healthiness=true \
             --set tag=latest

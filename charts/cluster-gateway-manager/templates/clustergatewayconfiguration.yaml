@@ -16,7 +16,7 @@ spec:
   egress:
   {{ if .Values.clusterProxy.enabled }}
     clusterProxy:
-      proxyServerHost: "proxy-entrypoint.open-cluster-management-addon"
+      proxyServerHost: "172.233.134.225"
       proxyServerPort: 8090
       credentials:
         namespace: open-cluster-management-addon

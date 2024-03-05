@@ -1,6 +1,5 @@
 # Image of the cluster-gateway instances
 image: ghcr.io/kluster-manager/cluster-gateway-manager
-
 tag: latest
 
 clusterGateway:
@@ -13,3 +12,7 @@ replicas: 1
 manualSecretManagement: false
 clusterProxy:
   enabled: true
+
+placement:
+  create: false
+  name: global

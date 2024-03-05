@@ -1,5 +1,5 @@
 SVC_NAME="${SVC_NAME:-kubevela-cluster-gateway}"
-SVC_NAMESPACE="${SVC_NAMESPACE:-vela-system}"
+SVC_NAMESPACE="${SVC_NAMESPACE:-cluster-gateway}"
 OUTPUT_DIR=${OUTPUT_DIR:-./cert}
 
 rm -r $OUTPUT_DIR;
