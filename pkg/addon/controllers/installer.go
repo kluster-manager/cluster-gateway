@@ -27,14 +27,12 @@ import (
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
-	"github.com/kluster-manager/cluster-gateway/pkg/event"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
 )
 
@@ -48,29 +46,77 @@ func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, caPair *crypto.CA
 		nativeClient: nativeClient,
 		caPair:       caPair,
 		secretLister: secretLister,
-		cache:        mgr.GetCache(),
 		client:       mgr.GetClient(),
 		mapper:       mgr.GetRESTMapper(),
 	}
+	apiServiceHandler := func(ctx context.Context, object client.Object) []reconcile.Request {
+		apiService := object.(*apiregistrationv1.APIService)
+		var reqs []reconcile.Request
+		if apiService.Name == common.ClusterGatewayAPIServiceName {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name: common.AddonName,
+				},
+			})
+		}
+		return reqs
+	}
+	gatewayConfigHandler := func(ctx context.Context, object client.Object) []reconcile.Request {
+		config := object.(*configv1alpha1.ClusterGatewayConfiguration)
+		var reqs []reconcile.Request
+
+		list := addonv1alpha1.ClusterManagementAddOnList{}
+		if err := mgr.GetClient().List(ctx, &list); err != nil {
+			ctrl.Log.WithName("ClusterGatewayConfiguration").Error(err, "failed list addons")
+			return reqs
+		}
+		for _, addon := range list.Items {
+			for _, ref := range addon.Spec.SupportedConfigs {
+				if ref.ConfigGroupResource.Group != configv1alpha1.GroupVersion.Group ||
+					ref.ConfigGroupResource.Resource != "clustergatewayconfigurations" {
+					continue
+				}
+				if ref.DefaultConfig != nil && ref.DefaultConfig.Name == config.Name {
+					reqs = append(reqs, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name: addon.Name,
+						},
+					})
+				}
+			}
+		}
+		return reqs
+	}
+	secretHandler := func(ctx context.Context, object client.Object) []reconcile.Request {
+		secret := object.(*corev1.Secret)
+		var reqs []reconcile.Request
+		for _, ref := range secret.OwnerReferences {
+			if ref.Kind == "ManagedServiceAccount" && ref.Name == common.AddonName {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name: common.AddonName,
+					},
+				})
+			}
+		}
+		return reqs
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		// Watches ClusterManagementAddOn singleton
 		For(&addonv1alpha1.ClusterManagementAddOn{}).
 		// Watches ClusterGatewayConfiguration singleton
-		Watches(&configv1alpha1.ClusterGatewayConfiguration{},
-			&event.ClusterGatewayConfigurationHandler{Client: mgr.GetClient()}).
+		Watches(&configv1alpha1.ClusterGatewayConfiguration{}, handler.EnqueueRequestsFromMapFunc(gatewayConfigHandler)).
 		// Watches ManagedClusterAddon.
-		Watches(&addonv1alpha1.ManagedClusterAddOn{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &addonv1alpha1.ClusterManagementAddOn{})).
+		Owns(&addonv1alpha1.ManagedClusterAddOn{}).
 		// Cluster-Gateway mTLS certificate should be actively reconciled
-		Watches(&corev1.Secret{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &addonv1alpha1.ClusterManagementAddOn{})).
+		Owns(&corev1.Secret{}).
 		// Secrets rotated by ManagedServiceAccount should be actively reconciled
-		Watches(&corev1.Secret{}, &event.SecretHandler{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(secretHandler)).
 		// Cluster-gateway apiserver instances should be actively reconciled
-		Watches(&appsv1.Deployment{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &addonv1alpha1.ClusterManagementAddOn{})).
+		Owns(&appsv1.Deployment{}).
 		// APIService should be actively reconciled
-		Watches(&apiregistrationv1.APIService{}, &event.APIServiceHandler{WatchingName: common.ClusterGatewayAPIServiceName}).
+		Watches(&apiregistrationv1.APIService{}, handler.EnqueueRequestsFromMapFunc(apiServiceHandler)).
 		Complete(installer)
 }
 
@@ -79,7 +125,6 @@ type ClusterGatewayInstaller struct {
 	secretLister corev1lister.SecretLister
 	caPair       *crypto.CA
 	client       client.Client
-	cache        cache.Cache
 	mapper       meta.RESTMapper
 }
 

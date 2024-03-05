@@ -35,7 +35,7 @@ func AddOnHealthResyncHandler(c client.Client, interval time.Duration) (*source.
 		}
 		return evs, nil
 	}, interval)
-	return ch, AddonHealthHandler{}
+	return ch, GenericEventHandler{}
 }
 
 type GeneratorFunc func() ([]event.GenericEvent, error)
@@ -63,12 +63,12 @@ func StartBackgroundExternalTimerResync(g GeneratorFunc, interval time.Duration)
 	return ch
 }
 
-var _ handler.EventHandler = &AddonHealthHandler{}
+var _ handler.EventHandler = &GenericEventHandler{}
 
-type AddonHealthHandler struct {
+type GenericEventHandler struct {
 }
 
-func (a AddonHealthHandler) Generic(_ context.Context, genericEvent event.GenericEvent, limitingInterface workqueue.RateLimitingInterface) {
+func (a GenericEventHandler) Generic(_ context.Context, genericEvent event.GenericEvent, limitingInterface workqueue.RateLimitingInterface) {
 	limitingInterface.Add(reconcile.Request{
 		NamespacedName: types.NamespacedName{
 			Namespace: genericEvent.Object.GetNamespace(),
@@ -77,14 +77,14 @@ func (a AddonHealthHandler) Generic(_ context.Context, genericEvent event.Generi
 	})
 }
 
-func (a AddonHealthHandler) Create(_ context.Context, createEvent event.CreateEvent, limitingInterface workqueue.RateLimitingInterface) {
+func (a GenericEventHandler) Create(_ context.Context, createEvent event.CreateEvent, limitingInterface workqueue.RateLimitingInterface) {
 	panic("implement me") // unreachable
 }
 
-func (a AddonHealthHandler) Update(_ context.Context, updateEvent event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
+func (a GenericEventHandler) Update(_ context.Context, updateEvent event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
 	panic("implement me") // unreachable
 }
 
-func (a AddonHealthHandler) Delete(_ context.Context, deleteEvent event.DeleteEvent, limitingInterface workqueue.RateLimitingInterface) {
+func (a GenericEventHandler) Delete(_ context.Context, deleteEvent event.DeleteEvent, limitingInterface workqueue.RateLimitingInterface) {
 	panic("implement me") // unreachable
 }
