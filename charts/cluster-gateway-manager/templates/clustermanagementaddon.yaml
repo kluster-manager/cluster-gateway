@@ -2,10 +2,17 @@ apiVersion: addon.open-cluster-management.io/v1alpha1
 kind: ClusterManagementAddOn
 metadata:
   name: cluster-gateway
+  annotations:
+    addon.open-cluster-management.io/lifecycle: "addon-manager"
 spec:
   addOnMeta:
-    displayName: cluster-gateway
-    description: cluster-gateway
+    displayName: {{ .Chart.Name }}
+    description: {{ .Chart.Description }}
+  installStrategy:
+    type: Placements
+    placements:
+      - name: {{ .Values.placement.name }}
+        namespace: {{ .Release.Namespace }}
   supportedConfigs:
     - group: config.gateway.open-cluster-management.io
       resource: clustergatewayconfigurations
