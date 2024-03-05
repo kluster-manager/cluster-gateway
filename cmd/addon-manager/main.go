@@ -9,8 +9,6 @@ import (
 	"github.com/kluster-manager/cluster-gateway/pkg/addon/agent"
 	"github.com/kluster-manager/cluster-gateway/pkg/addon/controllers"
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
-	"github.com/kluster-manager/cluster-gateway/pkg/util"
-	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -69,33 +67,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	currentNamespace := os.Getenv("POD_NAMESPACE")
-	if len(currentNamespace) == 0 {
-		inClusterNamespace, err := util.GetInClusterNamespace()
-		if err != nil {
-			klog.Fatal("the manager should be either running in a container or specify NAMESPACE environment")
-		}
-		currentNamespace = inClusterNamespace
-	}
+	//currentNamespace := os.Getenv("POD_NAMESPACE")
+	//if len(currentNamespace) == 0 {
+	//	inClusterNamespace, err := util.GetInClusterNamespace()
+	//	if err != nil {
+	//		klog.Fatal("the manager should be either running in a container or specify NAMESPACE environment")
+	//	}
+	//	currentNamespace = inClusterNamespace
+	//}
 
-	caPair, err := cert.EnsureCAPair(mgr.GetConfig(), currentNamespace, signerSecretName)
-	if err != nil {
-		setupLog.Error(err, "unable to ensure ca signer")
-	}
+	//caPair, err := cert.EnsureCAPair(mgr.GetConfig(), currentNamespace, signerSecretName)
+	//if err != nil {
+	//	setupLog.Error(err, "unable to ensure ca signer")
+	//}
 	nativeClient, err := kubernetes.NewForConfig(mgr.GetConfig())
 	if err != nil {
 		setupLog.Error(err, "unable to instantiate legacy client")
 		os.Exit(1)
 	}
 	informerFactory := informers.NewSharedInformerFactory(nativeClient, 0)
-	if err := controllers.SetupClusterGatewayInstallerWithManager(
-		mgr,
-		caPair,
-		nativeClient,
-		informerFactory.Core().V1().Secrets().Lister()); err != nil {
-		setupLog.Error(err, "unable to setup installer")
-		os.Exit(1)
-	}
+	//if err := controllers.SetupClusterGatewayInstallerWithManager(
+	//	mgr,
+	//	caPair,
+	//	nativeClient,
+	//	informerFactory.Core().V1().Secrets().Lister()); err != nil {
+	//	setupLog.Error(err, "unable to setup installer")
+	//	os.Exit(1)
+	//}
 	if err := controllers.SetupClusterGatewayHealthProberWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to setup health prober")
 		os.Exit(1)
