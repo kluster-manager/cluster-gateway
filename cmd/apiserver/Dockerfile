@@ -36,10 +36,12 @@ RUN CGO_ENABLED=0 \
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM alpine:3
+FROM gcr.io/distroless/base-debian12
 
 WORKDIR /
 COPY --from=builder /workspace/apiserver /
 COPY --from=builder /workspace/patch /
+
+USER 65534
 
 ENTRYPOINT ["/apiserver"]

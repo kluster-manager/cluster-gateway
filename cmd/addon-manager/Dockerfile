@@ -31,9 +31,11 @@ RUN CGO_ENABLED=0 \
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 ARG ARCH
-FROM multiarch/alpine:${ARCH}-v3.13
+FROM gcr.io/distroless/base-debian12
 
 WORKDIR /
 COPY --from=builder /workspace/addon-manager /
+
+USER 65534
 
 ENTRYPOINT ["/addon-manager"]
