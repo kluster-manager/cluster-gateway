@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"strconv"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -27,11 +29,14 @@ import (
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
+	eu "github.com/kluster-manager/cluster-gateway/pkg/event"
 	"github.com/kluster-manager/cluster-gateway/pkg/util/cert"
 )
 
@@ -40,13 +45,27 @@ var (
 )
 var _ reconcile.Reconciler = &ClusterGatewayInstaller{}
 
-func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, installNamespace string, caPair *crypto.CA, nativeClient kubernetes.Interface, secretLister corev1lister.SecretLister) error {
+func SetupClusterGatewayInstallerWithManager(
+	hostManager ctrl.Manager,
+	podNamespace string,
+	caPair *crypto.CA,
+	hostNativeClient kubernetes.Interface,
+	hostSecretLister corev1lister.SecretLister,
+	mcManager ctrl.Manager,
+	mcMode bool,
+	mcKubeconfigSecretName string,
+	addonManagerNamespace string,
+) error {
 	installer := &ClusterGatewayInstaller{
-		nativeClient:     nativeClient,
-		installNamespace: installNamespace,
-		caPair:           caPair,
-		secretLister:     secretLister,
-		client:           mgr.GetClient(),
+		hostNativeClient:       hostNativeClient,
+		podNamespace:           podNamespace,
+		caPair:                 caPair,
+		hostSecretLister:       hostSecretLister,
+		hostRtc:                hostManager.GetClient(),
+		mcRtc:                  mcManager.GetClient(),
+		mcMode:                 mcMode,
+		mcKubeconfigSecretName: mcKubeconfigSecretName,
+		addonManagerNamespace:  addonManagerNamespace,
 	}
 	apiServiceHandler := func(ctx context.Context, object client.Object) []reconcile.Request {
 		apiService := object.(*apiregistrationv1.APIService)
@@ -65,7 +84,7 @@ func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, installNamespace 
 		var reqs []reconcile.Request
 
 		list := addonv1alpha1.ClusterManagementAddOnList{}
-		if err := mgr.GetClient().List(ctx, &list); err != nil {
+		if err := mcManager.GetClient().List(ctx, &list); err != nil {
 			ctrl.Log.WithName("ClusterGatewayConfiguration").Error(err, "failed list addons")
 			return reqs
 		}
@@ -101,30 +120,74 @@ func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, installNamespace 
 		return reqs
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mcManager).
 		// Watches ClusterManagementAddOn singleton
 		For(&addonv1alpha1.ClusterManagementAddOn{}).
 		// Watches ClusterGatewayConfiguration singleton
 		Watches(&configv1alpha1.ClusterGatewayConfiguration{}, handler.EnqueueRequestsFromMapFunc(gatewayConfigHandler)).
 		// Watches ManagedClusterAddon.
 		Owns(&addonv1alpha1.ManagedClusterAddOn{}).
-		// Cluster-Gateway mTLS certificate should be actively reconciled
-		Owns(&corev1.Secret{}).
 		// Secrets rotated by ManagedServiceAccount should be actively reconciled
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(secretHandler)).
+		// APIService should be actively reconciled
+		Watches(&apiregistrationv1.APIService{}, handler.EnqueueRequestsFromMapFunc(apiServiceHandler))
+
+	if mcMode {
+		ch, handler := setupHostWatcher(hostManager)
+		builder = builder.
+			WatchesRawSource(ch, handler)
+	} else {
+		builder = builder.
+			// Cluster-Gateway mTLS certificate should be actively reconciled
+			Owns(&corev1.Secret{}).
+			// Cluster-gateway apiserver instances should be actively reconciled
+			Owns(&appsv1.Deployment{})
+	}
+	return builder.Complete(installer)
+}
+
+type HostReconciler struct {
+	events chan event.GenericEvent
+}
+
+var _ reconcile.Reconciler = &HostReconciler{}
+
+func (r *HostReconciler) Reconcile(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
+	var u unstructured.Unstructured
+	u.SetNamespace(req.Namespace)
+	u.SetName(req.Name)
+	r.events <- event.GenericEvent{
+		Object: &u,
+	}
+	return reconcile.Result{}, nil
+}
+
+func setupHostWatcher(hostManager ctrl.Manager) (*source.Channel, handler.EventHandler) {
+	events := make(chan event.GenericEvent) // unbuffered
+	ch := &source.Channel{Source: events}
+	r := &HostReconciler{
+		events: events,
+	}
+	ctrl.NewControllerManagedBy(hostManager).
+		// Cluster-Gateway mTLS certificate should be actively reconciled
+		Owns(&corev1.Secret{}).
 		// Cluster-gateway apiserver instances should be actively reconciled
 		Owns(&appsv1.Deployment{}).
-		// APIService should be actively reconciled
-		Watches(&apiregistrationv1.APIService{}, handler.EnqueueRequestsFromMapFunc(apiServiceHandler)).
-		Complete(installer)
+		Complete(r)
+	return ch, eu.GenericEventHandler{}
 }
 
 type ClusterGatewayInstaller struct {
-	nativeClient     kubernetes.Interface
-	secretLister     corev1lister.SecretLister
+	hostNativeClient kubernetes.Interface
+	hostSecretLister corev1lister.SecretLister
 	caPair           *crypto.CA
-	client           client.Client
-	installNamespace string
+	hostRtc          client.Client
+	podNamespace     string
+
+	mcRtc                  client.Client
+	mcMode                 bool
+	mcKubeconfigSecretName string
+	addonManagerNamespace  string
 }
 
 const (
@@ -136,7 +199,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 	// get the cluster-management-addon instance
 	log.Info("Start reconciling")
 	addon := &addonv1alpha1.ClusterManagementAddOn{}
-	if err := c.client.Get(ctx, request.NamespacedName, addon); err != nil {
+	if err := c.mcRtc.Get(ctx, request.NamespacedName, addon); err != nil {
 		if apierrors.IsNotFound(err) {
 			return reconcile.Result{}, nil
 		}
@@ -157,7 +220,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 
 		foundConfig = true
 		if ref.DefaultConfig != nil {
-			if err := c.client.Get(context.TODO(), types.NamespacedName{Name: ref.DefaultConfig.Name}, &clusterGatewayConfiguration); err != nil {
+			if err := c.mcRtc.Get(context.TODO(), types.NamespacedName{Name: ref.DefaultConfig.Name}, &clusterGatewayConfiguration); err != nil {
 				if apierrors.IsNotFound(err) {
 					return reconcile.Result{}, fmt.Errorf("no such configuration: %v", ref.DefaultConfig.Name)
 				}
@@ -171,7 +234,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		return reconcile.Result{}, nil
 	}
 
-	if err := c.ensureNamespace(c.installNamespace); err != nil {
+	if err := c.ensureNamespace(c.podNamespace); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required namespace")
 	}
 	if err := c.ensureClusterProxySecrets(&clusterGatewayConfiguration); err != nil {
@@ -183,51 +246,91 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 
 	sans := []string{
 		ServiceNameClusterGateway,
-		ServiceNameClusterGateway + "." + c.installNamespace,
-		ServiceNameClusterGateway + "." + c.installNamespace + ".svc",
+		ServiceNameClusterGateway + "." + c.podNamespace,
+		ServiceNameClusterGateway + "." + c.podNamespace + ".svc",
+	}
+	if c.podNamespace != c.addonManagerNamespace {
+		sans = append(sans,
+			ServiceNameClusterGateway+"."+c.addonManagerNamespace,
+			ServiceNameClusterGateway+"."+c.addonManagerNamespace+".svc",
+		)
 	}
 	rotation := certrotation.TargetRotation{
-		Namespace: c.installNamespace,
+		Namespace: c.podNamespace,
 		Name:      SecretNameClusterGatewayTLSCert,
 		HostNames: sans,
 		Validity:  time.Hour * 24 * 180,
-		Lister:    c.secretLister,
-		Client:    c.nativeClient.CoreV1(),
+		Lister:    c.hostSecretLister,
+		Client:    c.hostNativeClient.CoreV1(),
 	}
 	if err := rotation.EnsureTargetCertKeyPair(c.caPair, c.caPair.Config.Certs); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed rotating server tls cert")
 	}
 
-	caCertData, _, err := c.caPair.Config.GetPEMBytes()
-	if err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "failed encoding CA cert")
+	owner := addon
+	if c.mcMode {
+		owner = &addonv1alpha1.ClusterManagementAddOn{}
+		if err := c.hostRtc.Get(ctx, request.NamespacedName, owner); err != nil {
+			if apierrors.IsNotFound(err) {
+				return reconcile.Result{}, nil
+			}
+			return reconcile.Result{}, errors.Wrapf(err, "failed to get host cluster-management-addon: %v", request.Name)
+		}
 	}
 
 	// create if not exists
-	namespace := c.installNamespace
+	namespace := c.podNamespace
 	targets := []client.Object{
-		newServiceAccount(addon, namespace),
-		newClusterGatewayService(addon, namespace),
-		newAuthenticationRole(addon, namespace),
-		newAuthDelegatorRole(addon, namespace),
-		newAPFClusterRole(addon),
-		newAPFClusterRoleBinding(addon, namespace),
-		newAPIService(addon, namespace, caCertData),
+		newServiceAccount(owner, namespace),
+		newClusterGatewayService(owner, namespace),
+		newAuthenticationRole(owner, namespace),
+		newAuthDelegatorRole(owner, namespace),
+		newAPFClusterRole(owner),
+		newAPFClusterRoleBinding(owner, namespace),
 	}
 	for _, obj := range targets {
-		if err := c.client.Create(context.TODO(), obj); err != nil {
+		if err := c.hostRtc.Create(context.TODO(), obj); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
-				return reconcile.Result{}, errors.Wrapf(err, "failed deploying cluster-gateway")
+				return reconcile.Result{}, errors.Wrapf(err, "failed deploying host cluster-gateway components")
 			}
 		}
 	}
 
-	if err := c.ensureClusterGatewayDeployment(addon, &clusterGatewayConfiguration); err != nil {
+	if err := c.ensureClusterGatewayDeployment(owner, &clusterGatewayConfiguration); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed ensuring cluster-gateway deployment")
 	}
 
+	// /Users/tamal/go/src/kubeops.dev/installer/charts/kube-ui-server/templates/ocm-mc/svc.yaml
+	if c.mcMode {
+		var hostSvc corev1.Service
+		if err := c.hostRtc.Get(context.TODO(), types.NamespacedName{
+			Namespace: namespace,
+			Name:      common.AddonName,
+		}, &hostSvc); err != nil {
+			if apierrors.IsNotFound(err) || hostSvc.Spec.ClusterIP == "" {
+				return reconcile.Result{
+					Requeue:      true,
+					RequeueAfter: 5 * time.Second,
+				}, nil
+			}
+		}
+
+		mcTargets := []client.Object{
+			newMCNamespace(c.addonManagerNamespace),
+			newMCClusterGatewayService(addon, c.addonManagerNamespace, hostSvc.Spec.ClusterIP),
+			newMCClusterGatewayEndpoints(addon, c.addonManagerNamespace, hostSvc.Spec.ClusterIP),
+		}
+		for _, obj := range mcTargets {
+			if err := c.mcRtc.Create(context.TODO(), obj); err != nil {
+				if !apierrors.IsAlreadyExists(err) && !(obj.GetObjectKind().GroupVersionKind().Kind == "Service" && apierrors.IsInvalid(err)) {
+					return reconcile.Result{}, errors.Wrapf(err, "failed deploying mc cluster-gateway components")
+				}
+			}
+		}
+	}
+
 	// always update apiservice
-	if err := c.ensureAPIService(addon, namespace); err != nil {
+	if err := c.ensureAPIService(addon, c.addonManagerNamespace); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed ensuring cluster-gateway apiservice")
 	}
 
@@ -244,7 +347,7 @@ func (c *ClusterGatewayInstaller) ensureNamespace(namespace string) error {
 			Name: namespace,
 		},
 	}
-	if _, err := c.nativeClient.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
+	if _, err := c.hostNativeClient.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return err
 		}
@@ -259,14 +362,19 @@ func (c *ClusterGatewayInstaller) ensureAPIService(addon *addonv1alpha1.ClusterM
 	}
 	expected := newAPIService(addon, namespace, caCertData)
 	current := &apiregistrationv1.APIService{}
-	if err := c.client.Get(context.TODO(), types.NamespacedName{
+	err = c.mcRtc.Get(context.TODO(), types.NamespacedName{
 		Name: expected.Name,
-	}, current); err != nil {
+	}, current)
+	if apierrors.IsNotFound(err) {
+		if err := c.mcRtc.Create(context.TODO(), expected); err != nil {
+			return errors.Wrapf(err, "failed to create cluster-gateway apiservice")
+		}
+	} else if err != nil {
 		return err
 	}
 	if !bytes.Equal(caCertData, current.Spec.CABundle) {
 		expected.ResourceVersion = current.ResourceVersion
-		if err := c.client.Update(context.TODO(), expected); err != nil {
+		if err := c.mcRtc.Update(context.TODO(), expected); err != nil {
 			return err
 		}
 	}
@@ -275,13 +383,13 @@ func (c *ClusterGatewayInstaller) ensureAPIService(addon *addonv1alpha1.ClusterM
 
 func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration) error {
 	currentClusterGateway := &appsv1.Deployment{}
-	if err := c.client.Get(context.TODO(), types.NamespacedName{
-		Namespace: c.installNamespace,
-		Name:      "gateway-deployment",
+	if err := c.hostRtc.Get(context.TODO(), types.NamespacedName{
+		Namespace: c.podNamespace,
+		Name:      common.AddonName,
 	}, currentClusterGateway); err != nil {
 		if apierrors.IsNotFound(err) {
-			clusterGateway := newClusterGatewayDeployment(addon, config, c.installNamespace)
-			if err := c.client.Create(context.TODO(), clusterGateway); err != nil {
+			clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName)
+			if err := c.hostRtc.Create(context.TODO(), clusterGateway); err != nil {
 				return err
 			}
 			return nil
@@ -299,9 +407,9 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 		}
 	}
 
-	clusterGateway := newClusterGatewayDeployment(addon, config, c.installNamespace)
+	clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName)
 	clusterGateway.ResourceVersion = currentClusterGateway.ResourceVersion
-	if err := c.client.Update(context.TODO(), clusterGateway); err != nil {
+	if err := c.hostRtc.Update(context.TODO(), clusterGateway); err != nil {
 		return err
 	}
 	return nil
@@ -311,17 +419,20 @@ func (c *ClusterGatewayInstaller) ensureClusterProxySecrets(config *configv1alph
 	if config.Spec.Egress.ClusterProxy == nil {
 		return nil
 	}
+	if config.Spec.Egress.ClusterProxy.Credentials.Namespace == c.podNamespace {
+		return nil
+	}
 	proxyClientCASecretName := config.Spec.Egress.ClusterProxy.Credentials.ProxyClientCASecretName
-	err := cert.CopySecret(c.nativeClient,
+	err := cert.CopySecret(c.hostNativeClient,
 		config.Spec.Egress.ClusterProxy.Credentials.Namespace, proxyClientCASecretName,
-		c.installNamespace, proxyClientCASecretName)
+		c.podNamespace, proxyClientCASecretName)
 	if err != nil {
 		return errors.Wrapf(err, "failed copy secret %v", proxyClientCASecretName)
 	}
 	proxyClientSecretName := config.Spec.Egress.ClusterProxy.Credentials.ProxyClientSecretName
-	err = cert.CopySecret(c.nativeClient,
+	err = cert.CopySecret(c.hostNativeClient,
 		config.Spec.Egress.ClusterProxy.Credentials.Namespace, proxyClientSecretName,
-		c.installNamespace, proxyClientSecretName)
+		c.podNamespace, proxyClientSecretName)
 	if err != nil {
 		return errors.Wrapf(err, "failed copy secret %v", proxyClientSecretName)
 	}
@@ -332,7 +443,7 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 	if config.Spec.SecretManagement.Type != configv1alpha1.SecretManagementTypeManagedServiceAccount {
 		return nil
 	}
-	if _, err := c.client.RESTMapper().KindFor(schema.GroupVersionResource{
+	if _, err := c.mcRtc.RESTMapper().KindFor(schema.GroupVersionResource{
 		Group:    ocmauthv1beta1.GroupVersion.Group,
 		Version:  ocmauthv1beta1.GroupVersion.Version,
 		Resource: "managedserviceaccounts",
@@ -340,7 +451,7 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 		return fmt.Errorf("failed to discover ManagedServiceAccount resource in the cluster")
 	}
 	addonList := &addonv1alpha1.ManagedClusterAddOnList{}
-	if err := c.client.List(context.TODO(), addonList); err != nil {
+	if err := c.mcRtc.List(context.TODO(), addonList); err != nil {
 		return errors.Wrapf(err, "failed to list managed cluster addons")
 	}
 	clusterGatewayAddon := make([]*addonv1alpha1.ManagedClusterAddOn, 0)
@@ -352,7 +463,7 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 	}
 	for _, addon := range clusterGatewayAddon {
 		managedServiceAccount := buildManagedServiceAccount(addon)
-		if err := c.client.Create(context.TODO(), managedServiceAccount); err != nil {
+		if err := c.mcRtc.Create(context.TODO(), managedServiceAccount); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
 				return errors.Wrapf(err, "failed to create managed serviceaccount")
 			}
@@ -361,7 +472,19 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 	return nil
 }
 
-func newServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *corev1.ServiceAccount {
+func newMCNamespace(namespace string) *corev1.Namespace {
+	return &corev1.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+		},
+	}
+}
+
+func newServiceAccount(owner *addonv1alpha1.ClusterManagementAddOn, namespace string) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -374,8 +497,8 @@ func newServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, namespace st
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -384,7 +507,7 @@ func newServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, namespace st
 
 const labelKeyClusterGatewayConfigurationGeneration = "config.gateway.open-cluster-management.io/configuration-generation"
 
-func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration, installNamespace string) *appsv1.Deployment {
+func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration, installNamespace, mcKubeconfigSecretName string) *appsv1.Deployment {
 	args := []string{
 		"--secure-port=9443",
 		"--tls-cert-file=/etc/server/tls.crt",
@@ -446,8 +569,33 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 		)
 	}
 
-	maxUnavailable := intstr.FromInt(1)
-	maxSurge := intstr.FromInt(1)
+	// /Users/tamal/go/src/kubeops.dev/installer/charts/kube-ui-server/templates/deployment.yaml
+	if mcKubeconfigSecretName != "" {
+		args = append(args,
+			"--kubeconfig=/var/run/secrets/ocm/auth/kubeconfig",
+			"--authorization-kubeconfig=/var/run/secrets/ocm/auth/kubeconfig",
+			"--authentication-kubeconfig=/var/run/secrets/ocm/auth/kubeconfig",
+		)
+		volumes = append(volumes,
+			corev1.Volume{
+				Name: "ocm-auth",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: mcKubeconfigSecretName,
+					},
+				},
+			},
+		)
+		volumeMounts = append(volumeMounts,
+			corev1.VolumeMount{
+				Name:      "ocm-auth",
+				MountPath: "/var/run/secrets/ocm/auth",
+			},
+		)
+	}
+
+	maxUnavailable := intstr.FromInt32(1)
+	maxSurge := intstr.FromInt32(1)
 	deploy := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apps/v1",
@@ -455,13 +603,13 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: installNamespace,
-			Name:      "gateway-deployment",
+			Name:      common.AddonName,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 			Labels: map[string]string{
@@ -474,7 +622,7 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 					common.LabelKeyOpenClusterManagementAddon: common.AddonName,
 				},
 			},
-			Replicas: pointer.Int32(3),
+			Replicas: pointer.Int32(1),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -501,8 +649,7 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 							},
 						},
 					},
-					ServiceAccountName: common.AddonName,
-					Volumes:            volumes,
+					Volumes: volumes,
 				},
 			},
 			Strategy: appsv1.DeploymentStrategy{
@@ -515,10 +662,16 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 			},
 		},
 	}
+	if mcKubeconfigSecretName == "" {
+		deploy.Spec.Template.Spec.ServiceAccountName = common.AddonName
+		deploy.Spec.Template.Spec.AutomountServiceAccountToken = ptr.To(true)
+	} else {
+		deploy.Spec.Template.Spec.AutomountServiceAccountToken = ptr.To(false)
+	}
 	return deploy
 }
 
-func newClusterGatewayService(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *corev1.Service {
+func newClusterGatewayService(owner *addonv1alpha1.ClusterManagementAddOn, namespace string) *corev1.Service {
 	return &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -531,8 +684,8 @@ func newClusterGatewayService(addon *addonv1alpha1.ClusterManagementAddOn, names
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -551,7 +704,50 @@ func newClusterGatewayService(addon *addonv1alpha1.ClusterManagementAddOn, names
 	}
 }
 
-func newAPIService(addon *addonv1alpha1.ClusterManagementAddOn, namespace string, verifyingCABundle []byte) *apiregistrationv1.APIService {
+func newMCClusterGatewayService(owner *addonv1alpha1.ClusterManagementAddOn, namespace string, hostSvcIP string) *corev1.Service {
+	svc := newClusterGatewayService(owner, namespace)
+	svc.Spec.ClusterIP = hostSvcIP
+	return svc
+}
+
+func newMCClusterGatewayEndpoints(owner *addonv1alpha1.ClusterManagementAddOn, namespace string, hostSvcIP string) *corev1.Endpoints {
+	return &corev1.Endpoints{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Endpoints",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      common.AddonName,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: addonv1alpha1.GroupVersion.String(),
+					Kind:       "ClusterManagementAddOn",
+					UID:        owner.UID,
+					Name:       owner.Name,
+				},
+			},
+		},
+		Subsets: []corev1.EndpointSubset{
+			{
+				Addresses: []corev1.EndpointAddress{
+					{
+						IP: hostSvcIP,
+					},
+				},
+				Ports: []corev1.EndpointPort{
+					{
+						Name:     "https",
+						Port:     9443,
+						Protocol: corev1.ProtocolTCP,
+					},
+				},
+			},
+		},
+	}
+}
+
+func newAPIService(owner *addonv1alpha1.ClusterManagementAddOn, namespace string, verifyingCABundle []byte) *apiregistrationv1.APIService {
 	return &apiregistrationv1.APIService{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "v1alpha1.gateway.open-cluster-management.io",
@@ -559,8 +755,8 @@ func newAPIService(addon *addonv1alpha1.ClusterManagementAddOn, namespace string
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -579,7 +775,7 @@ func newAPIService(addon *addonv1alpha1.ClusterManagementAddOn, namespace string
 	}
 }
 
-func newAuthenticationRole(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.RoleBinding {
+func newAuthenticationRole(owner *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "kube-system",
@@ -588,8 +784,8 @@ func newAuthenticationRole(addon *addonv1alpha1.ClusterManagementAddOn, namespac
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -607,7 +803,7 @@ func newAuthenticationRole(addon *addonv1alpha1.ClusterManagementAddOn, namespac
 	}
 }
 
-func newAuthDelegatorRole(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
+func newAuthDelegatorRole(owner *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "auth-delegator:cluster-gateway",
@@ -615,8 +811,8 @@ func newAuthDelegatorRole(addon *addonv1alpha1.ClusterManagementAddOn, namespace
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -634,7 +830,7 @@ func newAuthDelegatorRole(addon *addonv1alpha1.ClusterManagementAddOn, namespace
 	}
 }
 
-func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.ClusterRole {
+func newAPFClusterRole(owner *addonv1alpha1.ClusterManagementAddOn) *rbacv1.ClusterRole {
 	return &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "open-cluster-management:cluster-gateway:apiserver",
@@ -642,8 +838,8 @@ func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -690,7 +886,7 @@ func newAPFClusterRole(addon *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 	}
 }
 
-func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
+func newAPFClusterRoleBinding(owner *addonv1alpha1.ClusterManagementAddOn, namespace string) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "open-cluster-management:cluster-gateway:apiserver",
@@ -698,8 +894,8 @@ func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, names
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ClusterManagementAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
@@ -717,21 +913,21 @@ func newAPFClusterRoleBinding(addon *addonv1alpha1.ClusterManagementAddOn, names
 	}
 }
 
-func buildManagedServiceAccount(addon *addonv1alpha1.ManagedClusterAddOn) *ocmauthv1beta1.ManagedServiceAccount {
+func buildManagedServiceAccount(owner *addonv1alpha1.ManagedClusterAddOn) *ocmauthv1beta1.ManagedServiceAccount {
 	return &ocmauthv1beta1.ManagedServiceAccount{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "authentication.open-cluster-management.io/v1alpha1",
 			Kind:       "ManagedServiceAccount",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: addon.Namespace,
+			Namespace: owner.Namespace,
 			Name:      common.AddonName,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: addonv1alpha1.GroupVersion.String(),
 					Kind:       "ManagedClusterAddOn",
-					UID:        addon.UID,
-					Name:       addon.Name,
+					UID:        owner.UID,
+					Name:       owner.Name,
 				},
 			},
 		},
