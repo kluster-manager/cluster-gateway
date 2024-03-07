@@ -67,8 +67,6 @@ spec:
                 type: object
               image:
                 type: string
-              installNamespace:
-                type: string
               secretManagement:
                 properties:
                   managedServiceAccount:
@@ -87,7 +85,6 @@ spec:
             required:
             - egress
             - image
-            - installNamespace
             - secretManagement
             type: object
           status:

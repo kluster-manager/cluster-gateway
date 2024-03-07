@@ -4,7 +4,6 @@ tag: latest
 
 clusterGateway:
   image: ghcr.io/kluster-manager/cluster-gateway
-  installNamespace: cluster-gateway
 
 # Number of replicas
 replicas: 1

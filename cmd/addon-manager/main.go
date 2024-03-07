@@ -91,6 +91,7 @@ func main() {
 	informerFactory := informers.NewSharedInformerFactory(nativeClient, 0)
 	if err := controllers.SetupClusterGatewayInstallerWithManager(
 		mgr,
+		currentNamespace,
 		caPair,
 		nativeClient,
 		informerFactory.Core().V1().Secrets().Lister()); err != nil {

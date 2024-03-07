@@ -13,7 +13,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -41,13 +40,13 @@ var (
 )
 var _ reconcile.Reconciler = &ClusterGatewayInstaller{}
 
-func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, caPair *crypto.CA, nativeClient kubernetes.Interface, secretLister corev1lister.SecretLister) error {
+func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, installNamespace string, caPair *crypto.CA, nativeClient kubernetes.Interface, secretLister corev1lister.SecretLister) error {
 	installer := &ClusterGatewayInstaller{
-		nativeClient: nativeClient,
-		caPair:       caPair,
-		secretLister: secretLister,
-		client:       mgr.GetClient(),
-		mapper:       mgr.GetRESTMapper(),
+		nativeClient:     nativeClient,
+		installNamespace: installNamespace,
+		caPair:           caPair,
+		secretLister:     secretLister,
+		client:           mgr.GetClient(),
 	}
 	apiServiceHandler := func(ctx context.Context, object client.Object) []reconcile.Request {
 		apiService := object.(*apiregistrationv1.APIService)
@@ -121,11 +120,11 @@ func SetupClusterGatewayInstallerWithManager(mgr ctrl.Manager, caPair *crypto.CA
 }
 
 type ClusterGatewayInstaller struct {
-	nativeClient kubernetes.Interface
-	secretLister corev1lister.SecretLister
-	caPair       *crypto.CA
-	client       client.Client
-	mapper       meta.RESTMapper
+	nativeClient     kubernetes.Interface
+	secretLister     corev1lister.SecretLister
+	caPair           *crypto.CA
+	client           client.Client
+	installNamespace string
 }
 
 const (
@@ -172,7 +171,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 		return reconcile.Result{}, nil
 	}
 
-	if err := c.ensureNamespace(clusterGatewayConfiguration.Spec.InstallNamespace); err != nil {
+	if err := c.ensureNamespace(c.installNamespace); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to ensure required namespace")
 	}
 	if err := c.ensureClusterProxySecrets(&clusterGatewayConfiguration); err != nil {
@@ -184,11 +183,11 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 
 	sans := []string{
 		ServiceNameClusterGateway,
-		ServiceNameClusterGateway + "." + clusterGatewayConfiguration.Spec.InstallNamespace,
-		ServiceNameClusterGateway + "." + clusterGatewayConfiguration.Spec.InstallNamespace + ".svc",
+		ServiceNameClusterGateway + "." + c.installNamespace,
+		ServiceNameClusterGateway + "." + c.installNamespace + ".svc",
 	}
 	rotation := certrotation.TargetRotation{
-		Namespace: clusterGatewayConfiguration.Spec.InstallNamespace,
+		Namespace: c.installNamespace,
 		Name:      SecretNameClusterGatewayTLSCert,
 		HostNames: sans,
 		Validity:  time.Hour * 24 * 180,
@@ -205,7 +204,7 @@ func (c *ClusterGatewayInstaller) Reconcile(ctx context.Context, request reconci
 	}
 
 	// create if not exists
-	namespace := clusterGatewayConfiguration.Spec.InstallNamespace
+	namespace := c.installNamespace
 	targets := []client.Object{
 		newServiceAccount(addon, namespace),
 		newClusterGatewayService(addon, namespace),
@@ -277,11 +276,11 @@ func (c *ClusterGatewayInstaller) ensureAPIService(addon *addonv1alpha1.ClusterM
 func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration) error {
 	currentClusterGateway := &appsv1.Deployment{}
 	if err := c.client.Get(context.TODO(), types.NamespacedName{
-		Namespace: config.Spec.InstallNamespace,
+		Namespace: c.installNamespace,
 		Name:      "gateway-deployment",
 	}, currentClusterGateway); err != nil {
 		if apierrors.IsNotFound(err) {
-			clusterGateway := newClusterGatewayDeployment(addon, config)
+			clusterGateway := newClusterGatewayDeployment(addon, config, c.installNamespace)
 			if err := c.client.Create(context.TODO(), clusterGateway); err != nil {
 				return err
 			}
@@ -300,7 +299,7 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 		}
 	}
 
-	clusterGateway := newClusterGatewayDeployment(addon, config)
+	clusterGateway := newClusterGatewayDeployment(addon, config, c.installNamespace)
 	clusterGateway.ResourceVersion = currentClusterGateway.ResourceVersion
 	if err := c.client.Update(context.TODO(), clusterGateway); err != nil {
 		return err
@@ -315,14 +314,14 @@ func (c *ClusterGatewayInstaller) ensureClusterProxySecrets(config *configv1alph
 	proxyClientCASecretName := config.Spec.Egress.ClusterProxy.Credentials.ProxyClientCASecretName
 	err := cert.CopySecret(c.nativeClient,
 		config.Spec.Egress.ClusterProxy.Credentials.Namespace, proxyClientCASecretName,
-		config.Spec.InstallNamespace, proxyClientCASecretName)
+		c.installNamespace, proxyClientCASecretName)
 	if err != nil {
 		return errors.Wrapf(err, "failed copy secret %v", proxyClientCASecretName)
 	}
 	proxyClientSecretName := config.Spec.Egress.ClusterProxy.Credentials.ProxyClientSecretName
 	err = cert.CopySecret(c.nativeClient,
 		config.Spec.Egress.ClusterProxy.Credentials.Namespace, proxyClientSecretName,
-		config.Spec.InstallNamespace, proxyClientSecretName)
+		c.installNamespace, proxyClientSecretName)
 	if err != nil {
 		return errors.Wrapf(err, "failed copy secret %v", proxyClientSecretName)
 	}
@@ -333,7 +332,7 @@ func (c *ClusterGatewayInstaller) ensureSecretManagement(clusterAddon *addonv1al
 	if config.Spec.SecretManagement.Type != configv1alpha1.SecretManagementTypeManagedServiceAccount {
 		return nil
 	}
-	if _, err := c.mapper.KindFor(schema.GroupVersionResource{
+	if _, err := c.client.RESTMapper().KindFor(schema.GroupVersionResource{
 		Group:    ocmauthv1beta1.GroupVersion.Group,
 		Version:  ocmauthv1beta1.GroupVersion.Version,
 		Resource: "managedserviceaccounts",
@@ -385,7 +384,7 @@ func newServiceAccount(addon *addonv1alpha1.ClusterManagementAddOn, namespace st
 
 const labelKeyClusterGatewayConfigurationGeneration = "config.gateway.open-cluster-management.io/configuration-generation"
 
-func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration) *appsv1.Deployment {
+func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration, installNamespace string) *appsv1.Deployment {
 	args := []string{
 		"--secure-port=9443",
 		"--tls-cert-file=/etc/server/tls.crt",
@@ -455,7 +454,7 @@ func newClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, co
 			Kind:       "Deployment",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: config.Spec.InstallNamespace,
+			Namespace: installNamespace,
 			Name:      "gateway-deployment",
 			OwnerReferences: []metav1.OwnerReference{
 				{

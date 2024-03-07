@@ -4,7 +4,6 @@ metadata:
   name: cluster-gateway
 spec:
   image: {{ .Values.clusterGateway.image }}:{{ .Values.tag | default (print "v" .Chart.Version) }}
-  installNamespace: {{ .Values.clusterGateway.installNamespace }}
   secretManagement:
   {{ if .Values.manualSecretManagement }}
     type: Manual
