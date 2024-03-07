@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	nativescheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
@@ -43,6 +44,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var signerSecretName string
+	var mcKubeconfig string
 
 	logger := klogr.New()
 	klog.SetOutput(os.Stdout)
@@ -54,11 +56,13 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&signerSecretName, "signer-secret-name", "cluster-gateway-signer",
 		"The name of the secret to store the signer CA")
+	flag.StringVar(&mcKubeconfig, "multicluster-kubeconfig", "",
+		"The path to multicluster-controlplane kubeconfig")
 
 	flag.Parse()
 	ctrl.SetLogger(logger)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	hostManager, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
@@ -66,8 +70,31 @@ func main() {
 		LeaderElectionID:       "cluster-gateway-manager",
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to create host manager")
 		os.Exit(1)
+	}
+
+	mcMode := mcKubeconfig != ""
+	var mcManager ctrl.Manager
+	if mcMode {
+		mcConfig, err := clientcmd.BuildConfigFromFlags("", mcKubeconfig)
+		if err != nil {
+			setupLog.Error(err, "unable to build multicluster rest config")
+			os.Exit(1)
+		}
+		mcManager, err = ctrl.NewManager(mcConfig, ctrl.Options{
+			Scheme:                 scheme,
+			Metrics:                metricsserver.Options{BindAddress: ""},
+			HealthProbeBindAddress: "",
+			LeaderElection:         enableLeaderElection,
+			LeaderElectionID:       "cluster-gateway-manager",
+		})
+		if err != nil {
+			setupLog.Error(err, "unable to create mc manager")
+			os.Exit(1)
+		}
+	} else {
+		mcManager = hostManager
 	}
 
 	currentNamespace := os.Getenv("POD_NAMESPACE")
@@ -79,26 +106,28 @@ func main() {
 		currentNamespace = inClusterNamespace
 	}
 
-	caPair, err := cert.EnsureCAPair(mgr.GetConfig(), currentNamespace, signerSecretName)
+	caPair, err := cert.EnsureCAPair(hostManager.GetConfig(), currentNamespace, signerSecretName)
 	if err != nil {
 		setupLog.Error(err, "unable to ensure ca signer")
 	}
-	nativeClient, err := kubernetes.NewForConfig(mgr.GetConfig())
+	hostNativeClient, err := kubernetes.NewForConfig(hostManager.GetConfig())
 	if err != nil {
 		setupLog.Error(err, "unable to instantiate legacy client")
 		os.Exit(1)
 	}
-	informerFactory := informers.NewSharedInformerFactory(nativeClient, 0)
+	informerFactory := informers.NewSharedInformerFactory(hostNativeClient, 0)
 	if err := controllers.SetupClusterGatewayInstallerWithManager(
-		mgr,
+		hostManager,
 		currentNamespace,
 		caPair,
-		nativeClient,
-		informerFactory.Core().V1().Secrets().Lister()); err != nil {
+		hostNativeClient,
+		informerFactory.Core().V1().Secrets().Lister(),
+		mcManager,
+		mcMode); err != nil {
 		setupLog.Error(err, "unable to setup installer")
 		os.Exit(1)
 	}
-	if err := controllers.SetupClusterGatewayHealthProberWithManager(mgr); err != nil {
+	if err := controllers.SetupClusterGatewayHealthProberWithManager(mcManager); err != nil {
 		setupLog.Error(err, "unable to setup health prober")
 		os.Exit(1)
 	}
@@ -106,14 +135,14 @@ func main() {
 	ctx := context.Background()
 	go informerFactory.Start(ctx.Done())
 
-	addonManager, err := addonmanager.New(mgr.GetConfig())
+	addonManager, err := addonmanager.New(mcManager.GetConfig())
 	if err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
 	if err := addonManager.AddAgent(agent.NewClusterGatewayAddonManager(
-		mgr.GetConfig(),
-		mgr.GetClient(),
+		mcManager.GetConfig(),
+		mcManager.GetClient(),
 	)); err != nil {
 		setupLog.Error(err, "unable to register addon manager")
 		os.Exit(1)
@@ -122,9 +151,10 @@ func main() {
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 	defer cancel()
 	go addonManager.Start(ctx)
-
-	if err := mgr.Start(ctx); err != nil {
+	if mcMode {
+		go mcManager.Start(ctx)
+	}
+	if err := hostManager.Start(ctx); err != nil {
 		panic(err)
 	}
-
 }
