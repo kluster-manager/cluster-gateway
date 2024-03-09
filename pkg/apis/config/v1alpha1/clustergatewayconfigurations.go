@@ -31,6 +31,10 @@ type ClusterGatewayConfigurationList struct {
 type ClusterGatewayConfigurationSpec struct {
 	// +required
 	Image string `json:"image"`
+	// `replicas` is the expected replicas of the gateway servers.
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas"`
 	// +required
 	SecretManagement ClusterGatewaySecretManagement `json:"secretManagement"`
 	// +required

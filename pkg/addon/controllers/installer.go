@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"k8s.io/utils/ptr"
 	"strconv"
 	"time"
 
@@ -23,7 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1lister "k8s.io/client-go/listers/core/v1"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"open-cluster-management.io/addon-framework/pkg/certrotation"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
@@ -622,7 +621,7 @@ func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, co
 					common.LabelKeyOpenClusterManagementAddon: common.AddonName,
 				},
 			},
-			Replicas: pointer.Int32(1),
+			Replicas: ptr.To(config.Spec.Replicas),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -766,7 +765,7 @@ func newAPIService(owner *addonv1alpha1.ClusterManagementAddOn, namespace string
 			Service: &apiregistrationv1.ServiceReference{
 				Namespace: namespace,
 				Name:      common.AddonName,
-				Port:      pointer.Int32(9443),
+				Port:      ptr.To(int32(9443)),
 			},
 			GroupPriorityMinimum: 5000,
 			VersionPriority:      10,

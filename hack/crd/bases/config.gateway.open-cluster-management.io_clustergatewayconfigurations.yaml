@@ -67,6 +67,11 @@ spec:
                 type: object
               image:
                 type: string
+              replicas:
+                default: 1
+                description: '`replicas` is the expected replicas of the gateway servers.'
+                format: int32
+                type: integer
               secretManagement:
                 properties:
                   managedServiceAccount:
