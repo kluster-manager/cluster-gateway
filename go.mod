@@ -11,7 +11,7 @@ require (
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.9.0
-	google.golang.org/grpc v1.62.0
+	google.golang.org/grpc v1.62.1
 	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2
 	k8s.io/apiserver v0.29.2
@@ -20,11 +20,11 @@ require (
 	k8s.io/klog/v2 v2.120.1
 	k8s.io/kube-aggregator v0.29.2
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340
-	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
+	k8s.io/utils v0.0.0-20240310230437-4693a0247e57
 	kmodules.xyz/client-go v0.29.12
-	open-cluster-management.io/addon-framework v0.9.0
+	open-cluster-management.io/addon-framework v0.9.2
 	open-cluster-management.io/api v0.13.0
-	open-cluster-management.io/managed-serviceaccount v0.4.0
+	open-cluster-management.io/managed-serviceaccount v0.5.0
 	sigs.k8s.io/apiserver-network-proxy v0.29.0
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.29.0
 	sigs.k8s.io/apiserver-runtime v1.1.2-0.20231213224704-8af026f5e12a
@@ -127,7 +127,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.29.0 // indirect
 	k8s.io/kms v0.29.2 // indirect
-	open-cluster-management.io/sdk-go v0.13.0 // indirect
+	open-cluster-management.io/sdk-go v0.13.1-0.20240416030555-aa744f426379 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
