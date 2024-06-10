@@ -114,7 +114,7 @@ generate: controller-gen
 
 manifests: controller-gen
 	${CONTROLLER_GEN} $(CRD_OPTIONS) \
-		paths="./pkg/apis/config/..." \
+		paths="./pkg/apis/..." \
 		rbac:roleName=manager-role \
 		output:crd:artifacts:config=hack/crd/bases
 
