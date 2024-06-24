@@ -17,6 +17,12 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/sdk/log"
+	sdkresource "go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -153,6 +159,30 @@ func (c *ClusterGatewayProxy) Connect(ctx context.Context, id string, options ru
 			return nil, fmt.Errorf("proxying by user %v is forbidden authorization failed", user.GetName())
 		}
 	}
+
+	// Create resource.
+	res, err := newResource()
+	if err != nil {
+		panic(err)
+	}
+
+	// Create a logger provider.
+	// You can pass this instance directly when creating bridges.
+	loggerProvider, err := newLoggerProvider(res)
+	if err != nil {
+		panic(err)
+	}
+
+	// Handle shutdown properly so nothing leaks.
+	defer func() {
+		if err := loggerProvider.Shutdown(ctx); err != nil {
+			fmt.Println(err)
+		}
+	}()
+
+	logger := slog.New(otelslog.NewHandler("", otelslog.WithLoggerProvider(loggerProvider)))
+
+	logger.LogAttrs(ctx, 8, "", getAttributes()...)
 
 	return &proxyHandler{
 		parentName:     id,
@@ -420,4 +450,161 @@ func unescapeQueryValues(values url.Values) url.Values {
 		unescaped[k] = vs
 	}
 	return unescaped
+}
+
+func newResource() (*sdkresource.Resource, error) {
+	return sdkresource.Merge(sdkresource.Default(),
+		sdkresource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName("audit-logs"),
+			semconv.ServiceVersion("0.1.0"),
+		))
+}
+
+func newLoggerProvider(res *sdkresource.Resource) (*log.LoggerProvider, error) {
+	exporter, err := getHTTPlogExporter()
+	if err != nil {
+		return nil, err
+	}
+	processor := log.NewBatchProcessor(exporter, log.WithMaxQueueSize(4), log.WithExportMaxBatchSize(1))
+	provider := log.NewLoggerProvider(
+		log.WithResource(res),
+		log.WithProcessor(processor),
+	)
+	return provider, nil
+}
+
+func getHTTPlogExporter() (log.Exporter, error) {
+	return otlploghttp.New(context.Background())
+}
+
+func getAttributes() []slog.Attr {
+	attrs := []slog.Attr{
+		{
+			Key:   "audit.level",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.auditID",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.stage",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.requestURI",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.verb",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.user.username",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.user.uid",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.user.groups",
+			Value: slog.AnyValue(strings.Join([]string{}, ",")),
+		},
+		{
+			Key:   "audit.impersonatedUser.username",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.impersonatedUser.uid",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.impersonatedUser.groups",
+			Value: slog.AnyValue(strings.Join([]string{}, ",")),
+		},
+		{
+			Key:   "audit.sourceIPs",
+			Value: slog.AnyValue(strings.Join([]string{}, ",")),
+		},
+		{
+			Key:   "audit.userAgent",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.uid",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.resource",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.namespace",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.name",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.uid",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.apiGroup",
+			Value: slog.AnyValue(""),
+		},
+
+		{
+			Key:   "audit.objectRef.apiVersion",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.resourceVersion",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.objectRef.subresource",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.responseStatus.status",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.responseStatus.message",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.responseStatus.reason",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.responseStatus.details",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.responseStatus.code",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.requestObject",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.responseObject",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.requestReceivedTimestamp",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "audit.stageTimestamp",
+			Value: slog.AnyValue(""),
+		},
+	}
+	return attrs
 }
