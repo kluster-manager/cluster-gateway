@@ -163,26 +163,20 @@ func (c *ClusterGatewayProxy) Connect(ctx context.Context, id string, options ru
 	// Create resource.
 	res, err := newResource()
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("failed to create resource for logger provider")
 	}
 
 	// Create a logger provider.
 	// You can pass this instance directly when creating bridges.
-	loggerProvider, err := newLoggerProvider(res)
+	loggerProvider, err := newLoggerProvider(ctx, res)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("failed to create logger provider")
 	}
 
 	// Handle shutdown properly so nothing leaks.
-	defer func() {
-		if err := loggerProvider.Shutdown(ctx); err != nil {
-			fmt.Println(err)
-		}
-	}()
+	defer loggerProvider.Shutdown(ctx)
 
-	logger := slog.New(otelslog.NewHandler("", otelslog.WithLoggerProvider(loggerProvider)))
-
-	logger.LogAttrs(ctx, 8, "", getAttributes()...)
+	logger := slog.New(otelslog.NewHandler("audit-logger", otelslog.WithLoggerProvider(loggerProvider)))
 
 	return &proxyHandler{
 		parentName:     id,
@@ -191,6 +185,7 @@ func (c *ClusterGatewayProxy) Connect(ctx context.Context, id string, options ru
 		clusterGateway: clusterGateway,
 		responder:      r,
 		finishFunc: func(code int) {
+			logger.LogAttrs(ctx, slog.LevelInfo, "", getAttributes()...)
 			metrics.RecordProxiedRequestsByResource(proxyReqInfo.Resource, proxyReqInfo.Verb, code)
 			metrics.RecordProxiedRequestsByCluster(id, code)
 			metrics.RecordProxiedRequestsDuration(proxyReqInfo.Resource, proxyReqInfo.Verb, id, code, time.Since(ts))
@@ -456,17 +451,17 @@ func newResource() (*sdkresource.Resource, error) {
 	return sdkresource.Merge(sdkresource.Default(),
 		sdkresource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceName("audit-logs"),
-			semconv.ServiceVersion("0.1.0"),
+			semconv.ServiceName("cluster-gateway"),
+			semconv.ServiceVersion("1.0.0"),
 		))
 }
 
-func newLoggerProvider(res *sdkresource.Resource) (*log.LoggerProvider, error) {
-	exporter, err := getHTTPlogExporter()
+func newLoggerProvider(ctx context.Context, res *sdkresource.Resource) (*log.LoggerProvider, error) {
+	exporter, err := otlploghttp.New(ctx)
 	if err != nil {
 		return nil, err
 	}
-	processor := log.NewBatchProcessor(exporter, log.WithMaxQueueSize(4), log.WithExportMaxBatchSize(1))
+	processor := log.NewBatchProcessor(exporter)
 	provider := log.NewLoggerProvider(
 		log.WithResource(res),
 		log.WithProcessor(processor),
@@ -474,135 +469,102 @@ func newLoggerProvider(res *sdkresource.Resource) (*log.LoggerProvider, error) {
 	return provider, nil
 }
 
-func getHTTPlogExporter() (log.Exporter, error) {
-	return otlploghttp.New(context.Background())
-}
-
 func getAttributes() []slog.Attr {
 	attrs := []slog.Attr{
 		{
-			Key:   "audit.level",
+			Key:   "kind",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.auditID",
+			Key:   "apiVersion",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.stage",
+			Key:   "metadata.creationTimestamp",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.requestURI",
+			Key:   "level",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.verb",
+			Key:   "timestamp",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.user.username",
+			Key:   "auditID",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.user.uid",
+			Key:   "stage",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.user.groups",
+			Key:   "requestURI",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "verb",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "user.username",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "user.groups",
 			Value: slog.AnyValue(strings.Join([]string{}, ",")),
 		},
 		{
-			Key:   "audit.impersonatedUser.username",
+			Key:   "impersonatedUser.username",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.impersonatedUser.uid",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.impersonatedUser.groups",
+			Key:   "impersonatedUser.groups",
 			Value: slog.AnyValue(strings.Join([]string{}, ",")),
 		},
 		{
-			Key:   "audit.sourceIPs",
+			Key:   "sourceIPs",
 			Value: slog.AnyValue(strings.Join([]string{}, ",")),
 		},
 		{
-			Key:   "audit.userAgent",
+			Key:   "objectRef.resource",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.uid",
+			Key:   "objectRef.namespace",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.resource",
+			Key:   "objectRef.name",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.namespace",
+			Key:   "objectRef.apiVersion",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.name",
+			Key:   "responseStatus.metadata",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.uid",
+			Key:   "responseStatus.status",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.apiGroup",
-			Value: slog.AnyValue(""),
-		},
-
-		{
-			Key:   "audit.objectRef.apiVersion",
+			Key:   "responseStatus.message",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.resourceVersion",
+			Key:   "responseStatus.reason",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.objectRef.subresource",
+			Key:   "responseStatus.details.kind",
 			Value: slog.AnyValue(""),
 		},
 		{
-			Key:   "audit.responseStatus.status",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.responseStatus.message",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.responseStatus.reason",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.responseStatus.details",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.responseStatus.code",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.requestObject",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.responseObject",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.requestReceivedTimestamp",
-			Value: slog.AnyValue(""),
-		},
-		{
-			Key:   "audit.stageTimestamp",
+			Key:   "responseStatus.code",
 			Value: slog.AnyValue(""),
 		},
 	}
