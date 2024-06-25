@@ -17,6 +17,12 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/sdk/log"
+	sdkresource "go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -154,6 +160,24 @@ func (c *ClusterGatewayProxy) Connect(ctx context.Context, id string, options ru
 		}
 	}
 
+	// Create resource.
+	res, err := newResource()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource for logger provider")
+	}
+
+	// Create a logger provider.
+	// You can pass this instance directly when creating bridges.
+	loggerProvider, err := newLoggerProvider(ctx, res)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger provider")
+	}
+
+	// Handle shutdown properly so nothing leaks.
+	defer loggerProvider.Shutdown(ctx)
+
+	logger := slog.New(otelslog.NewHandler("audit-logger", otelslog.WithLoggerProvider(loggerProvider)))
+
 	return &proxyHandler{
 		parentName:     id,
 		path:           proxyOpts.Path,
@@ -161,6 +185,7 @@ func (c *ClusterGatewayProxy) Connect(ctx context.Context, id string, options ru
 		clusterGateway: clusterGateway,
 		responder:      r,
 		finishFunc: func(code int) {
+			logger.LogAttrs(ctx, slog.LevelInfo, "", getAttributes()...)
 			metrics.RecordProxiedRequestsByResource(proxyReqInfo.Resource, proxyReqInfo.Verb, code)
 			metrics.RecordProxiedRequestsByCluster(id, code)
 			metrics.RecordProxiedRequestsDuration(proxyReqInfo.Resource, proxyReqInfo.Verb, id, code, time.Since(ts))
@@ -419,4 +444,128 @@ func unescapeQueryValues(values url.Values) url.Values {
 		unescaped[k] = vs
 	}
 	return unescaped
+}
+
+func newResource() (*sdkresource.Resource, error) {
+	return sdkresource.Merge(sdkresource.Default(),
+		sdkresource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName("cluster-gateway"),
+			semconv.ServiceVersion("1.0.0"),
+		))
+}
+
+func newLoggerProvider(ctx context.Context, res *sdkresource.Resource) (*log.LoggerProvider, error) {
+	exporter, err := otlploghttp.New(ctx)
+	if err != nil {
+		return nil, err
+	}
+	processor := log.NewBatchProcessor(exporter)
+	provider := log.NewLoggerProvider(
+		log.WithResource(res),
+		log.WithProcessor(processor),
+	)
+	return provider, nil
+}
+
+func getAttributes() []slog.Attr {
+	attrs := []slog.Attr{
+		{
+			Key:   "kind",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "apiVersion",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "metadata.creationTimestamp",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "level",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "timestamp",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "auditID",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "stage",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "requestURI",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "verb",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "user.username",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "user.groups",
+			Value: slog.AnyValue(strings.Join([]string{}, ",")),
+		},
+		{
+			Key:   "impersonatedUser.username",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "impersonatedUser.groups",
+			Value: slog.AnyValue(strings.Join([]string{}, ",")),
+		},
+		{
+			Key:   "sourceIPs",
+			Value: slog.AnyValue(strings.Join([]string{}, ",")),
+		},
+		{
+			Key:   "objectRef.resource",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "objectRef.namespace",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "objectRef.name",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "objectRef.apiVersion",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "responseStatus.metadata",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "responseStatus.status",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "responseStatus.message",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "responseStatus.reason",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "responseStatus.details.kind",
+			Value: slog.AnyValue(""),
+		},
+		{
+			Key:   "responseStatus.code",
+			Value: slog.AnyValue(""),
+		},
+	}
+	return attrs
 }
