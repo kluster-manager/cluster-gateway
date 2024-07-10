@@ -132,9 +132,9 @@ func SetupClusterGatewayInstallerWithManager(
 		Watches(&apiregistrationv1.APIService{}, handler.EnqueueRequestsFromMapFunc(apiServiceHandler))
 
 	if mcMode {
-		ch, handler := setupHostWatcher(hostManager)
+		src := setupHostWatcher(hostManager)
 		builder = builder.
-			WatchesRawSource(ch, handler)
+			WatchesRawSource(src)
 	} else {
 		builder = builder.
 			// Cluster-Gateway mTLS certificate should be actively reconciled
@@ -161,9 +161,8 @@ func (r *HostReconciler) Reconcile(_ context.Context, req reconcile.Request) (re
 	return reconcile.Result{}, nil
 }
 
-func setupHostWatcher(hostManager ctrl.Manager) (*source.Channel, handler.EventHandler) {
+func setupHostWatcher(hostManager ctrl.Manager) source.Source {
 	events := make(chan event.GenericEvent) // unbuffered
-	ch := &source.Channel{Source: events}
 	r := &HostReconciler{
 		events: events,
 	}
@@ -173,7 +172,7 @@ func setupHostWatcher(hostManager ctrl.Manager) (*source.Channel, handler.EventH
 		// Cluster-gateway apiserver instances should be actively reconciled
 		Owns(&appsv1.Deployment{}).
 		Complete(r)
-	return ch, eu.GenericEventHandler{}
+	return source.Channel[client.Object](events, eu.GenericEventHandler{})
 }
 
 type ClusterGatewayInstaller struct {

@@ -17,7 +17,7 @@ import (
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
 )
 
-func AddOnHealthResyncHandler(c client.Client, interval time.Duration) (*source.Channel, handler.EventHandler) {
+func AddOnHealthResyncHandler(c client.Client, interval time.Duration) source.Source {
 	ch := StartBackgroundExternalTimerResync(func() ([]event.GenericEvent, error) {
 		addonList := &addonv1alpha1.ManagedClusterAddOnList{}
 		if err := c.List(context.TODO(), addonList); err != nil {
@@ -35,14 +35,13 @@ func AddOnHealthResyncHandler(c client.Client, interval time.Duration) (*source.
 		}
 		return evs, nil
 	}, interval)
-	return ch, GenericEventHandler{}
+	return source.Channel[client.Object](ch, GenericEventHandler{})
 }
 
 type GeneratorFunc func() ([]event.GenericEvent, error)
 
-func StartBackgroundExternalTimerResync(g GeneratorFunc, interval time.Duration) *source.Channel {
+func StartBackgroundExternalTimerResync(g GeneratorFunc, interval time.Duration) <-chan event.GenericEvent {
 	events := make(chan event.GenericEvent) // unbuffered
-	ch := &source.Channel{Source: events}
 	ticker := time.NewTicker(interval)
 	go func() {
 		for {
@@ -60,7 +59,7 @@ func StartBackgroundExternalTimerResync(g GeneratorFunc, interval time.Duration)
 			}
 		}
 	}()
-	return ch
+	return events
 }
 
 var _ handler.EventHandler = &GenericEventHandler{}
