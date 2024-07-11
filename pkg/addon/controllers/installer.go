@@ -854,7 +854,7 @@ func newAPFClusterRole(owner *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 			},
 			{
 				APIGroups: []string{"admissionregistration.k8s.io"},
-				Resources: []string{"mutatingwebhookconfigurations", "validatingwebhookconfigurations"},
+				Resources: []string{"mutatingwebhookconfigurations", "validatingwebhookconfigurations", "validatingadmissionpolicies", "validatingadmissionpolicybindings"},
 				Verbs:     []string{"get", "list", "watch"},
 			},
 			{
