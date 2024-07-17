@@ -510,7 +510,7 @@ func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, co
 		"--secure-port=9443",
 		"--tls-cert-file=/etc/server/tls.crt",
 		"--tls-private-key-file=/etc/server/tls.key",
-		"--feature-gates=HealthinessCheck=true,ClientIdentityPenetration=true",
+		"--feature-gates=HealthinessCheck=true,ClientIdentityPenetration=true,ValidatingAdmissionPolicy=false",
 	}
 	volumes := []corev1.Volume{
 		{
