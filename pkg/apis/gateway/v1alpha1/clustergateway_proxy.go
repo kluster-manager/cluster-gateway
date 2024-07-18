@@ -358,11 +358,12 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 		return *projected
 	}
 
-	// don't impersonate service accounts
-	if strings.HasPrefix(user.GetName(), "system:serviceaccount:") {
-		return restclient.ImpersonationConfig{}
-	}
+	//// don't impersonate service accounts
+	//if strings.HasPrefix(user.GetName(), "system:serviceaccount:") {
+	//	return restclient.ImpersonationConfig{}
+	//}
 	return restclient.ImpersonationConfig{
+		UID:      user.GetUID(),
 		UserName: user.GetName(),
 		Groups:   user.GetGroups(),
 		Extra:    user.GetExtra(),
