@@ -358,14 +358,25 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 		return *projected
 	}
 
-	// don't impersonate service accounts
-	if strings.HasPrefix(user.GetName(), "system:serviceaccount:") {
-		return restclient.ImpersonationConfig{}
+	isSA := strings.HasPrefix(user.GetName(), "system:serviceaccount:")
+	extras := map[string][]string{}
+	for k, v := range user.GetExtra() {
+		/*
+			`kube-apiserver` added:
+			  - `alpha` support (guarded by the `ServiceAccountTokenJTI` feature gate) for adding a `jti` (JWT ID) claim to service account tokens it issues, adding an `authentication.kubernetes.io/credential-id` audit annotation in audit logs when the tokens are issued, and `authentication.kubernetes.io/credential-id` entry in the extra user info when the token is used to authenticate.
+			  - `alpha` support (guarded by the `ServiceAccountTokenPodNodeInfo` feature gate) for including the node name (and uid, if the node exists) as additional claims in service account tokens it issues which are bound to pods, and `authentication.kubernetes.io/node-name` and `authentication.kubernetes.io/node-uid` extra user info when the token is used to authenticate.
+			cluster-gateway s/a is not given permission to impersonate such user extras.
+			So, such user extras must be filtered out.
+		*/
+		if !isSA || !strings.HasPrefix(k, "authentication.kubernetes.io/") {
+			extras[k] = v
+		}
 	}
 	return restclient.ImpersonationConfig{
+		UID:      user.GetUID(),
 		UserName: user.GetName(),
 		Groups:   user.GetGroups(),
-		Extra:    user.GetExtra(),
+		Extra:    extras,
 	}
 }
 
