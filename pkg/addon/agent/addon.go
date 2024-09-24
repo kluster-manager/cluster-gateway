@@ -72,7 +72,7 @@ func (c *clusterGatewayAddonManager) Manifests(cluster *clusterv1.ManagedCluster
 				return nil, err
 			}
 			return buildClusterGatewayOutboundPermission(
-				managedServiceAccountAddon.Status.Namespace,
+				managedServiceAccountAddon.Spec.InstallNamespace,
 				cfg.Spec.SecretManagement.ManagedServiceAccount.Name), nil
 		case configv1alpha1.SecretManagementTypeManual:
 			fallthrough
