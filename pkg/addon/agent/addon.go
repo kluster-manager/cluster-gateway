@@ -113,6 +113,12 @@ func buildClusterGatewayOutboundPermission(serviceAccountNamespace, serviceAccou
 				Verbs:     []string{"impersonate"},
 			},
 			{
+				// Can set the "Impersonate-Uid" header.
+				APIGroups: []string{"authentication.k8s.io"},
+				Resources: []string{"uids"},
+				Verbs:     []string{"impersonate"},
+			},
+			{
 				NonResourceURLs: []string{"/healthz"},
 				Verbs:           []string{"get"},
 			},

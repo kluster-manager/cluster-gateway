@@ -15,8 +15,10 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"net/http"
 
+	authenticationv1alpha1 "github.com/kluster-manager/cluster-auth/apis/authentication/v1alpha1"
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
 	gatewayv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/gateway/v1alpha1"
 	"github.com/kluster-manager/cluster-gateway/pkg/common"
@@ -59,6 +61,8 @@ func init() {
 	ocmauthv1beta1.AddToScheme(scheme)
 	gatewayv1alpha1.AddToScheme(scheme)
 	configv1alpha1.AddToScheme(scheme)
+	configv1alpha1.AddToScheme(scheme)
+	authenticationv1alpha1.AddToScheme(scheme)
 }
 
 func main() {
@@ -105,6 +109,18 @@ func main() {
 				if err != nil {
 					klog.Fatal("unable to create manager", err)
 				}
+
+				err = mgr.GetFieldIndexer().IndexField(context.Background(), &authenticationv1alpha1.Account{}, gatewayv1alpha1.ImpersonatorKey, func(rawObj client.Object) []string {
+					account := rawObj.(*authenticationv1alpha1.Account)
+					if account.Status.ServiceAccountRef != nil {
+						return []string{account.Status.ServiceAccountRef.Name}
+					}
+					return nil
+				})
+				if err != nil {
+					klog.Fatal("unable to create indexer for "+gatewayv1alpha1.ImpersonatorKey, err)
+				}
+
 				return config
 			}).
 		WithOpenAPIDefinitions(common.AddonName, "v0.0.1", openapi.GetOpenAPIDefinitions).
@@ -132,6 +148,7 @@ func main() {
 	config.AddLogFlags(cmd.Flags())
 	config.AddClusterProxyFlags(cmd.Flags())
 	config.AddProxyAuthorizationFlags(cmd.Flags())
+	config.AddClusterAuthNamespaceFlags(cmd.Flags())
 	config.AddUserAgentFlags(cmd.Flags())
 	config.AddClusterGatewayProxyConfig(cmd.Flags())
 	if err := cmd.Execute(); err != nil {

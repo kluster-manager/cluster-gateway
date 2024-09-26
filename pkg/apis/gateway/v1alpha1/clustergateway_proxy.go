@@ -31,9 +31,11 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/strings/slices"
 
+	"github.com/kluster-manager/cluster-auth/apis/authentication/v1alpha1"
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
 	"github.com/kluster-manager/cluster-gateway/pkg/metrics"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,6 +53,7 @@ import (
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource/resourcerest"
 	contextutil "sigs.k8s.io/apiserver-runtime/pkg/util/context"
 	"sigs.k8s.io/apiserver-runtime/pkg/util/loopback"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ resource.SubResource = &ClusterGatewayProxy{}
@@ -58,6 +61,8 @@ var _ registryrest.Storage = &ClusterGatewayProxy{}
 var _ resourcerest.Connecter = &ClusterGatewayProxy{}
 
 var proxyMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
+var ImpersonatorKey = ".metadata.impersonator"
 
 // ClusterGatewayProxy is a subresource for ClusterGateway which allows user to proxy
 // kubernetes resource requests to the managed cluster.
@@ -359,6 +364,26 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 	}
 
 	isSA := strings.HasPrefix(user.GetName(), "system:serviceaccount:")
+	if isSA {
+		parts := strings.Split(user.GetName(), ":")
+		if len(parts) == 4 && parts[2] == config.ClusterAuthNamespace {
+			var accounts v1alpha1.AccountList
+			if err := singleton.GetClient().List(context.TODO(), &accounts, client.MatchingFields{ImpersonatorKey: parts[3]}); err == nil && len(accounts.Items) == 1 {
+				ac := accounts.Items[0]
+				extras := make(map[string][]string, len(ac.Spec.Extra))
+				for k, v := range ac.Spec.Extra {
+					extras[k] = v
+				}
+				return restclient.ImpersonationConfig{
+					UID:      ac.Spec.UID,
+					UserName: ac.Spec.Username,
+					Groups:   ac.Spec.Groups,
+					Extra:    extras,
+				}
+			}
+		}
+	}
+
 	extras := map[string][]string{}
 	for k, v := range user.GetExtra() {
 		/*
@@ -372,6 +397,7 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 			extras[k] = v
 		}
 	}
+
 	return restclient.ImpersonationConfig{
 		UID:      user.GetUID(),
 		UserName: user.GetName(),

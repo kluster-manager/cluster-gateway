@@ -54,6 +54,7 @@ func SetupClusterGatewayInstallerWithManager(
 	mcMode bool,
 	mcKubeconfigSecretName string,
 	addonManagerNamespace string,
+	clusterAuthNamespace string,
 ) error {
 	installer := &ClusterGatewayInstaller{
 		hostNativeClient:       hostNativeClient,
@@ -65,6 +66,7 @@ func SetupClusterGatewayInstallerWithManager(
 		mcMode:                 mcMode,
 		mcKubeconfigSecretName: mcKubeconfigSecretName,
 		addonManagerNamespace:  addonManagerNamespace,
+		clusterAuthNamespace:   clusterAuthNamespace,
 	}
 	apiServiceHandler := func(ctx context.Context, object client.Object) []reconcile.Request {
 		apiService := object.(*apiregistrationv1.APIService)
@@ -186,6 +188,7 @@ type ClusterGatewayInstaller struct {
 	mcMode                 bool
 	mcKubeconfigSecretName string
 	addonManagerNamespace  string
+	clusterAuthNamespace   string
 }
 
 const (
@@ -386,7 +389,7 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 		Name:      common.AddonName,
 	}, currentClusterGateway); err != nil {
 		if apierrors.IsNotFound(err) {
-			clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName)
+			clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName, c.clusterAuthNamespace)
 			if err := c.hostRtc.Create(context.TODO(), clusterGateway); err != nil {
 				return err
 			}
@@ -405,7 +408,7 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 		}
 	}
 
-	clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName)
+	clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName, c.clusterAuthNamespace)
 	clusterGateway.ResourceVersion = currentClusterGateway.ResourceVersion
 	if err := c.hostRtc.Update(context.TODO(), clusterGateway); err != nil {
 		return err
@@ -505,7 +508,7 @@ func newServiceAccount(owner *addonv1alpha1.ClusterManagementAddOn, namespace st
 
 const labelKeyClusterGatewayConfigurationGeneration = "config.gateway.open-cluster-management.io/configuration-generation"
 
-func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration, installNamespace, mcKubeconfigSecretName string) *appsv1.Deployment {
+func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration, installNamespace, mcKubeconfigSecretName, clusterAuthNamespace string) *appsv1.Deployment {
 	args := []string{
 		"--secure-port=9443",
 		"--tls-cert-file=/etc/server/tls.crt",
@@ -590,6 +593,10 @@ func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, co
 				MountPath: "/var/run/secrets/ocm/auth",
 			},
 		)
+	}
+
+	if clusterAuthNamespace != "" {
+		args = append(args, "--cluster-auth-namespace="+clusterAuthNamespace)
 	}
 
 	maxUnavailable := intstr.FromInt32(1)
@@ -879,6 +886,12 @@ func newAPFClusterRole(owner *addonv1alpha1.ClusterManagementAddOn) *rbacv1.Clus
 				Resources:     []string{"secrets"},
 				Verbs:         []string{"get", "list", "watch"},
 				ResourceNames: []string{common.AddonName},
+			},
+			// read cluster-auth Accounts
+			{
+				APIGroups: []string{"authentication.k8s.appscode.com"},
+				Resources: []string{"accounts"},
+				Verbs:     []string{"get", "list", "watch"},
 			},
 		},
 	}

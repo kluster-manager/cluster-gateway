@@ -17,7 +17,6 @@ import (
 	nativescheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"open-cluster-management.io/addon-framework/pkg/addonmanager"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
@@ -46,8 +45,9 @@ func main() {
 	var signerSecretName string
 	var mcKubeconfig string
 	var mcKubeconfigSecretName string
+	var clusterAuthNamespace string
 
-	logger := klogr.New()
+	logger := klog.NewKlogr()
 	klog.SetOutput(os.Stdout)
 	klog.InitFlags(flag.CommandLine)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":48080", "The address the metric endpoint binds to.")
@@ -61,6 +61,8 @@ func main() {
 		"The path to multicluster-controlplane kubeconfig")
 	flag.StringVar(&mcKubeconfigSecretName, "multicluster-kubeconfig-secret-name", "",
 		"The name of multicluster-controlplane kubeconfig secret")
+	flag.StringVar(&clusterAuthNamespace, "cluster-auth-namespace", "open-cluster-management-cluster-auth",
+		"Namespace used to create service accounts for cluster-auth addon")
 
 	flag.Parse()
 	ctrl.SetLogger(logger)
@@ -138,7 +140,8 @@ func main() {
 		mcManager,
 		mcMode,
 		mcKubeconfigSecretName,
-		addonManagerNamespace); err != nil {
+		addonManagerNamespace,
+		clusterAuthNamespace); err != nil {
 		setupLog.Error(err, "unable to setup installer")
 		os.Exit(1)
 	}
