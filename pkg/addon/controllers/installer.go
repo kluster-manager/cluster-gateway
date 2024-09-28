@@ -641,7 +641,22 @@ func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, co
 							Image:           config.Spec.Image,
 							ImagePullPolicy: corev1.PullAlways,
 							Args:            args,
-							VolumeMounts:    volumeMounts,
+							SecurityContext: &corev1.SecurityContext{
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{
+										"ALL",
+									},
+								},
+								Privileged:               ptr.To(false),
+								RunAsNonRoot:             ptr.To(true),
+								ReadOnlyRootFilesystem:   ptr.To(true),
+								AllowPrivilegeEscalation: ptr.To(false),
+								SeccompProfile: &corev1.SeccompProfile{
+									Type: corev1.SeccompProfileTypeRuntimeDefault,
+								},
+								AppArmorProfile: nil,
+							},
+							VolumeMounts: volumeMounts,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    *resource.NewMilliQuantity(100, resource.DecimalSI),
