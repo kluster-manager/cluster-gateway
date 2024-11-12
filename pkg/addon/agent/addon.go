@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
+	kmapi "kmodules.xyz/client-go/api/v1"
 	"open-cluster-management.io/addon-framework/pkg/agent"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -116,6 +117,11 @@ func buildClusterGatewayOutboundPermission(serviceAccountNamespace, serviceAccou
 				// Can set the "Impersonate-Uid" header.
 				APIGroups: []string{"authentication.k8s.io"},
 				Resources: []string{"uids"},
+				Verbs:     []string{"impersonate"},
+			},
+			{
+				APIGroups: []string{"authentication.k8s.io"},
+				Resources: []string{"userextras/" + kmapi.AceOrgIDKey},
 				Verbs:     []string{"impersonate"},
 			},
 			{
