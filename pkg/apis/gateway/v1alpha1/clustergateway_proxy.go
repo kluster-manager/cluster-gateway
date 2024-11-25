@@ -49,6 +49,7 @@ import (
 	registryrest "k8s.io/apiserver/pkg/registry/rest"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/transport"
+	kmapi "kmodules.xyz/client-go/api/v1"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource"
 	"sigs.k8s.io/apiserver-runtime/pkg/builder/resource/resourcerest"
 	contextutil "sigs.k8s.io/apiserver-runtime/pkg/util/context"
@@ -364,25 +365,6 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 	}
 
 	isSA := strings.HasPrefix(user.GetName(), "system:serviceaccount:")
-	if isSA {
-		parts := strings.Split(user.GetName(), ":")
-		if len(parts) == 4 && parts[2] == config.ClusterAuthNamespace {
-			var accounts v1alpha1.AccountList
-			if err := singleton.GetClient().List(context.TODO(), &accounts, client.MatchingFields{ImpersonatorKey: parts[3]}); err == nil && len(accounts.Items) == 1 {
-				ac := accounts.Items[0]
-				extras := make(map[string][]string, len(ac.Spec.Extra))
-				for k, v := range ac.Spec.Extra {
-					extras[k] = v
-				}
-				return restclient.ImpersonationConfig{
-					UID:      ac.Spec.UID,
-					UserName: ac.Spec.Username,
-					Groups:   ac.Spec.Groups,
-					Extra:    extras,
-				}
-			}
-		}
-	}
 
 	extras := map[string][]string{}
 	for k, v := range user.GetExtra() {
@@ -395,6 +377,56 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 		*/
 		if !isSA || !strings.HasPrefix(k, "authentication.kubernetes.io/") {
 			extras[k] = v
+		}
+	}
+
+	if isSA {
+		// for trickster
+		saParts := strings.Split(user.GetName(), ":")
+		if len(saParts) == 4 && saParts[2] == config.ClusterAuthNamespace {
+			var accounts v1alpha1.AccountList
+			if err := singleton.GetClient().List(context.TODO(), &accounts, client.MatchingFields{ImpersonatorKey: saParts[3]}); err == nil && len(accounts.Items) == 1 {
+				ac := accounts.Items[0]
+				extras := make(map[string][]string, len(ac.Spec.Extra))
+				for k, v := range ac.Spec.Extra {
+					extras[k] = v
+				}
+
+				groups := []string{
+					"system:authenticated",
+					"system:serviceaccounts",
+				}
+				acParts := strings.SplitN(ac.Spec.Username, ":", 4)
+				if len(acParts) == 4 {
+					groups = append(groups, "system:serviceaccounts:"+acParts[2])
+				}
+
+				return restclient.ImpersonationConfig{
+					UID:      ac.Spec.UID,
+					UserName: ac.Spec.Username,
+					Groups:   groups,
+					Extra:    extras,
+				}
+			}
+		}
+	} else {
+		var ac v1alpha1.Account
+		if err := singleton.GetClient().Get(context.TODO(), client.ObjectKey{Name: user.GetName()}, &ac); err == nil {
+			for k, v := range ac.Spec.Extra {
+				extras[k] = v
+			}
+			var groups []string
+			if clientOrgId := extras[kmapi.AceOrgIDKey]; len(clientOrgId) == 1 {
+				groups = ac.Spec.Groups[clientOrgId[0]]
+				groups = append(groups, fmt.Sprintf("ace.org.%v", clientOrgId[0]))
+			}
+
+			return restclient.ImpersonationConfig{
+				UID:      ac.Spec.UID,
+				UserName: ac.Spec.Username,
+				Groups:   groups,
+				Extra:    extras,
+			}
 		}
 	}
 
