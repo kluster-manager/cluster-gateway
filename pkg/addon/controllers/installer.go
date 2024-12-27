@@ -23,7 +23,7 @@ import (
 	corev1lister "k8s.io/client-go/listers/core/v1"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"k8s.io/utils/ptr"
-	"open-cluster-management.io/addon-framework/pkg/certrotation"
+	"open-cluster-management.io/sdk-go/pkg/certrotation"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
