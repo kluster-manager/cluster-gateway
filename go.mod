@@ -24,7 +24,7 @@ require (
 	k8s.io/kube-aggregator v0.30.2
 	k8s.io/kube-openapi v0.0.0-20240430033511-f0e62f92d13f
 	k8s.io/utils v0.0.0-20240310230437-4693a0247e57
-	kmodules.xyz/client-go v0.30.43
+	kmodules.xyz/client-go v0.30.44
 	open-cluster-management.io/addon-framework v0.11.0
 	open-cluster-management.io/api v0.15.0
 	open-cluster-management.io/managed-serviceaccount v0.7.0
