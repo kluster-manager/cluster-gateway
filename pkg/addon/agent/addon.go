@@ -121,7 +121,7 @@ func buildClusterGatewayOutboundPermission(serviceAccountNamespace, serviceAccou
 			},
 			{
 				APIGroups: []string{"authentication.k8s.io"},
-				Resources: []string{"userextras/" + kmapi.AceOrgIDKey},
+				Resources: []string{"userextras/" + kmapi.AceOrgIDKey, "userextras/" + kmapi.ClientOrgKey},
 				Verbs:     []string{"impersonate"},
 			},
 			{
