@@ -417,8 +417,11 @@ func (p *proxyHandler) getImpersonationConfig(req *http.Request) restclient.Impe
 			}
 			var groups []string
 			if clientOrgId := extras[kmapi.AceOrgIDKey]; len(clientOrgId) == 1 {
-				groups = ac.Spec.Groups[clientOrgId[0]]
-				groups = append(groups, fmt.Sprintf("ace.org.%v", clientOrgId[0]))
+				if v, ok := ac.Spec.Groups[clientOrgId[0]]; ok {
+					groups = append(v, fmt.Sprintf("ace.org.%v", clientOrgId[0]))
+				} else {
+					delete(extras, kmapi.AceOrgIDKey)
+				}
 			}
 
 			return restclient.ImpersonationConfig{
