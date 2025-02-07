@@ -237,9 +237,14 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
+	ctx, cancel := context.WithCancel(request.Context())
+	defer cancel()
+
+	klog.Infoln("proxying cluster >>>>>>> request.Context()", ctx)
+
 	// Go 1.19 removes the URL clone in WithContext method and therefore change
 	// to deep copy here
-	newReq := request.Clone(request.Context())
+	newReq := request.Clone(ctx)
 	newReq.Header = utilnet.CloneHeader(request.Header)
 	newReq.URL.Path = p.path
 
@@ -255,11 +260,12 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 	newReq.URL.RawQuery = unescapeQueryValues(request.URL.Query()).Encode()
 	newReq.RequestURI = newReq.URL.RequestURI()
 
-	cfg, err := NewConfigFromCluster(request.Context(), cluster)
+	cfg, grpcc, err := NewConfigFromCluster(ctx, cluster)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client config %s", cluster.Name))
 		return
 	}
+
 	if p.impersonate || utilfeature.DefaultFeatureGate.Enabled(featuregates.ClientIdentityPenetration) {
 		cfg.Impersonate = p.getImpersonationConfig(request)
 	}
@@ -269,6 +275,7 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
 		return
 	}
+
 	proxy := apiproxy.NewUpgradeAwareHandler(
 		&url.URL{
 			Scheme:   urlAddr.Scheme,
@@ -313,6 +320,9 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		p.responder.Error(err)
 	})
 	proxy.ServeHTTP(writer, newReq)
+	if grpcc != nil {
+		grpcc.Close()
+	}
 }
 
 type noSuppressPanicError struct{}

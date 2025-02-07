@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -27,6 +28,7 @@ var _ reconcile.Reconciler = &ClusterGatewayHealthProber{}
 
 type ClusterGatewayHealthProber struct {
 	multiClusterRestClient rest.Interface
+	hc                     *http.Client
 	gatewayClient          versioned.Interface
 	runtimeClient          client.Client
 }
@@ -38,12 +40,18 @@ func SetupClusterGatewayHealthProberWithManager(mgr ctrl.Manager) error {
 	}
 	copied := rest.CopyConfig(mgr.GetConfig())
 	copied.WrapTransport = multicluster.NewClusterGatewayRoundTripper
-	multiClusterClient, err := kubernetes.NewForConfig(copied)
+
+	hc, err := rest.HTTPClientFor(copied)
+	if err != nil {
+		return err
+	}
+	multiClusterClient, err := kubernetes.NewForConfigAndClient(copied, hc)
 	if err != nil {
 		return err
 	}
 	prober := &ClusterGatewayHealthProber{
 		multiClusterRestClient: multiClusterClient.Discovery().RESTClient(),
+		hc:                     hc,
 		gatewayClient:          gatewayClient,
 		runtimeClient:          mgr.GetClient(),
 	}
@@ -69,6 +77,7 @@ func (c *ClusterGatewayHealthProber) Reconcile(ctx context.Context, request reco
 		Get().
 		AbsPath("healthz").
 		DoRaw(multicluster.WithMultiClusterContext(context.TODO(), clusterName))
+	c.hc.CloseIdleConnections()
 	healthy := string(resp) == "ok" && healthErr == nil
 	if !healthy {
 		healthErrMsg := ""

@@ -16,7 +16,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	gort "runtime"
+	"time"
 
 	authenticationv1alpha1 "github.com/kluster-manager/cluster-auth/apis/authentication/v1alpha1"
 	configv1alpha1 "github.com/kluster-manager/cluster-gateway/pkg/apis/config/v1alpha1"
@@ -39,6 +42,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	cu "kmodules.xyz/client-go/client"
+	_ "net/http/pprof"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
@@ -66,6 +70,23 @@ func init() {
 }
 
 func main() {
+	go func() {
+		fmt.Println(http.ListenAndServe(":6060", nil))
+	}()
+
+	ticker := time.NewTicker(5 * time.Second)
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case t := <-ticker.C:
+				fmt.Println("Tick at", t)
+				gort.GC()
+			}
+		}
+	}()
 
 	// registering metrics
 	metrics.Register()
