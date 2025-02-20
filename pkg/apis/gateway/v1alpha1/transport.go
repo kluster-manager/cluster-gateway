@@ -2,10 +2,13 @@ package v1alpha1
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -20,7 +23,44 @@ import (
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
-var DialerGetter = func(ctx context.Context) (k8snet.DialFunc, error) {
+type tlsCacheKey struct {
+	caData     string
+	certData   string
+	keyData    string
+	serverName string
+}
+
+var mu sync.Mutex
+var tlsCache = map[tlsCacheKey]*tls.Config{}
+
+func GetClientTLSConfig(caFile, certFile, keyFile, serverName string) (*tls.Config, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	caData, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, err
+	}
+	certData, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+	keyData, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, err
+	}
+
+	key := tlsCacheKey{
+		caData:     string(caData),
+		certData:   string(certData),
+		keyData:    string(keyData),
+		serverName: serverName,
+	}
+	cache, found := tlsCache[key]
+	if found {
+		return cache, nil
+	}
+
 	tlsCfg, err := util.GetClientTLSConfig(
 		config.ClusterProxyCAFile,
 		config.ClusterProxyCertFile,
@@ -30,13 +70,29 @@ var DialerGetter = func(ctx context.Context) (k8snet.DialFunc, error) {
 	if err != nil {
 		return nil, err
 	}
-	dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnel(
+	tlsCache[key] = tlsCfg
+	return tlsCfg, nil
+}
+
+var DialerGetter = func(ctx context.Context) (k8snet.DialFunc, error) {
+	tlsCfg, err := GetClientTLSConfig(
+		config.ClusterProxyCAFile,
+		config.ClusterProxyCertFile,
+		config.ClusterProxyKeyFile,
+		config.ClusterProxyHost)
+	if err != nil {
+		return nil, err
+	}
+	dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnelWithContext(
+		context.TODO(),
 		ctx,
 		net.JoinHostPort(config.ClusterProxyHost, strconv.Itoa(config.ClusterProxyPort)),
 		grpc.WithTransportCredentials(grpccredentials.NewTLS(tlsCfg)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time: time.Second * 5,
+			Time: time.Second * 10,
 		}),
+		grpc.WithSharedWriteBuffer(true),
+		grpc.WithReadBufferSize(0),
 	)
 	if err != nil {
 		return nil, err
@@ -86,11 +142,11 @@ func NewConfigFromCluster(ctx context.Context, c *ClusterGateway) (*restclient.C
 		cfg.Host = c.Name // the same as the cluster name
 		cfg.Insecure = true
 		cfg.CAData = nil
-		dail, err := DialerGetter(ctx)
+		dial, err := DialerGetter(ctx)
 		if err != nil {
 			return nil, err
 		}
-		cfg.Dial = dail
+		cfg.Dial = dial
 	}
 	// setting up credentials
 	switch c.Spec.Access.Credential.Type {

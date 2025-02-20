@@ -35,6 +35,10 @@ require (
 	sigs.k8s.io/controller-runtime v0.18.4
 )
 
+replace sigs.k8s.io/apiserver-network-proxy => github.com/kluster-manager/apiserver-network-proxy v0.30.5-0.20250220051651-2f3a08cfdf99
+
+replace sigs.k8s.io/apiserver-network-proxy/konnectivity-client => github.com/kluster-manager/apiserver-network-proxy/konnectivity-client v0.30.5-0.20250220051651-2f3a08cfdf99
+
 require (
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr/v4 v4.0.0-20230305170008-8188dc5388df // indirect
