@@ -67,23 +67,23 @@ var _ handler.EventHandler = &GenericEventHandler{}
 type GenericEventHandler struct {
 }
 
-func (a GenericEventHandler) Generic(_ context.Context, genericEvent event.GenericEvent, limitingInterface workqueue.RateLimitingInterface) {
-	limitingInterface.Add(reconcile.Request{
+func (a GenericEventHandler) Generic(_ context.Context, e event.TypedGenericEvent[client.Object], w workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	w.Add(reconcile.Request{
 		NamespacedName: types.NamespacedName{
-			Namespace: genericEvent.Object.GetNamespace(),
-			Name:      genericEvent.Object.GetName(),
+			Namespace: e.Object.GetNamespace(),
+			Name:      e.Object.GetName(),
 		},
 	})
 }
 
-func (a GenericEventHandler) Create(_ context.Context, createEvent event.CreateEvent, limitingInterface workqueue.RateLimitingInterface) {
-	panic("implement me") // unreachable
+func (a GenericEventHandler) Create(_ context.Context, e event.TypedCreateEvent[client.Object], w workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	panic("implement me")
 }
 
-func (a GenericEventHandler) Update(_ context.Context, updateEvent event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
-	panic("implement me") // unreachable
+func (a GenericEventHandler) Update(_ context.Context, e event.TypedUpdateEvent[client.Object], w workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	panic("implement me")
 }
 
-func (a GenericEventHandler) Delete(_ context.Context, deleteEvent event.DeleteEvent, limitingInterface workqueue.RateLimitingInterface) {
-	panic("implement me") // unreachable
+func (a GenericEventHandler) Delete(_ context.Context, e event.TypedDeleteEvent[client.Object], w workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	panic("implement me")
 }

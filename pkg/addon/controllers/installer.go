@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -23,9 +24,9 @@ import (
 	corev1lister "k8s.io/client-go/listers/core/v1"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"k8s.io/utils/ptr"
-	"open-cluster-management.io/sdk-go/pkg/certrotation"
 	addonv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	ocmauthv1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+	"open-cluster-management.io/sdk-go/pkg/certrotation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -383,13 +384,14 @@ func (c *ClusterGatewayInstaller) ensureAPIService(addon *addonv1alpha1.ClusterM
 }
 
 func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1alpha1.ClusterManagementAddOn, config *configv1alpha1.ClusterGatewayConfiguration) error {
+	clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName, c.clusterAuthNamespace)
+
 	currentClusterGateway := &appsv1.Deployment{}
 	if err := c.hostRtc.Get(context.TODO(), types.NamespacedName{
 		Namespace: c.podNamespace,
 		Name:      common.AddonName,
 	}, currentClusterGateway); err != nil {
 		if apierrors.IsNotFound(err) {
-			clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName, c.clusterAuthNamespace)
 			if err := c.hostRtc.Create(context.TODO(), clusterGateway); err != nil {
 				return err
 			}
@@ -397,23 +399,34 @@ func (c *ClusterGatewayInstaller) ensureClusterGatewayDeployment(addon *addonv1a
 		}
 		return err
 	}
-	genStr, ok := currentClusterGateway.Labels[labelKeyClusterGatewayConfigurationGeneration]
-	if ok {
-		gen, err := strconv.Atoi(genStr)
-		if err != nil {
-			return err
-		}
-		if config.Generation == int64(gen) {
-			return nil
-		}
+
+	if clusterGatewayConfigurationEquals(currentClusterGateway, config) &&
+		clusterGatewayDeploymentEquals(currentClusterGateway, clusterGateway) {
+		return nil
 	}
 
-	clusterGateway := newClusterGatewayDeployment(addon, config, c.podNamespace, c.mcKubeconfigSecretName, c.clusterAuthNamespace)
 	clusterGateway.ResourceVersion = currentClusterGateway.ResourceVersion
 	if err := c.hostRtc.Update(context.TODO(), clusterGateway); err != nil {
 		return err
 	}
 	return nil
+}
+
+func clusterGatewayConfigurationEquals(currentClusterGateway *appsv1.Deployment, config *configv1alpha1.ClusterGatewayConfiguration) bool {
+	genStr, ok := currentClusterGateway.Labels[labelKeyClusterGatewayConfigurationGeneration]
+	if ok {
+		gen, err := strconv.Atoi(genStr)
+		if err != nil {
+			return false
+		}
+		return config.Generation == int64(gen)
+	}
+	return false
+}
+
+func clusterGatewayDeploymentEquals(cur, desired *appsv1.Deployment) bool {
+	// handle removal of ValidatingAdmissionPolicy=false from args
+	return reflect.DeepEqual(cur.Spec.Template.Spec.Containers[0].Args, desired.Spec.Template.Spec.Containers[0].Args)
 }
 
 func (c *ClusterGatewayInstaller) ensureClusterProxySecrets(config *configv1alpha1.ClusterGatewayConfiguration) error {
@@ -513,7 +526,7 @@ func newClusterGatewayDeployment(owner *addonv1alpha1.ClusterManagementAddOn, co
 		"--secure-port=9443",
 		"--tls-cert-file=/etc/server/tls.crt",
 		"--tls-private-key-file=/etc/server/tls.key",
-		"--feature-gates=HealthinessCheck=true,ClientIdentityPenetration=true,ValidatingAdmissionPolicy=false",
+		"--feature-gates=HealthinessCheck=true,ClientIdentityPenetration=true",
 	}
 	volumes := []corev1.Volume{
 		{

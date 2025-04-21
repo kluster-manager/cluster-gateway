@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/server"
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
@@ -139,7 +138,7 @@ func main() {
 		}).
 		WithPostStartHook("init-controller-manager", func(ctx server.PostStartHookContext) error {
 			singleton.SetClient(mgr.GetClient())
-			return mgr.Start(wait.ContextForChannel(ctx.StopCh))
+			return mgr.Start(ctx)
 		}).
 		Build()
 	if err != nil {
