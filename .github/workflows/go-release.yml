@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           path: go/src/ghcr.io/kluster-manager/cluster-gateway
       - name: get release version
         run: |
@@ -50,12 +50,12 @@ jobs:
         arch: [ amd64, arm64 ]
     steps:
       - name: checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           path: go/src/ghcr.io/kluster-manager/cluster-gateway
       - name: install Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: images multi arch
@@ -65,7 +65,7 @@ jobs:
           ARCH=${{ matrix.arch }} \
             make image
       - name: Login docker.io
-        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a # v2.1.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: docker.io
           username: ${{ secrets.DOCKER_USER }}
@@ -80,12 +80,12 @@ jobs:
     needs: [ env, image-multi-arch ]
     steps:
       - name: checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           path: go/src/ghcr.io/kluster-manager/cluster-gateway
       - name: Login docker.io
-        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a # v2.1.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: docker.io
           username: ${{ secrets.DOCKER_USER }}
@@ -118,9 +118,9 @@ jobs:
     needs: [ env, image-manifest ]
     steps:
       - name: checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           path: go/src/ghcr.io/kluster-manager/cluster-gateway
       - name: setup helm
         uses: azure/setup-helm@v1
