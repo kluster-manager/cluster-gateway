@@ -264,7 +264,7 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		cfg.Impersonate = p.getImpersonationConfig(request)
 	}
 
-	rt, err := restclient.TransportFor(cfg)
+	rt, err := proxyTransportFor(cfg, cluster)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
 		return
@@ -297,9 +297,18 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating upgrader client %s", cluster.Name))
 		return
 	}
+	// Use the shared, stable cluster-proxy dialer for upgrade (exec/attach/
+	// port-forward/SPDY) connections too, so they create konnectivity tunnels
+	// lazily (only when actually dialed) rather than eagerly per request.
+	upgradeDial := cfg.Dial
+	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
+		if holder, herr := ClusterProxyDialHolder(); herr == nil && holder != nil {
+			upgradeDial = holder.Dial
+		}
+	}
 	upgrading := utilnet.SetOldTransportDefaults(&http.Transport{
 		TLSClientConfig: tlsConfig,
-		DialContext:     cfg.Dial,
+		DialContext:     upgradeDial,
 	})
 	proxy.UpgradeTransport = apiproxy.NewUpgradeRequestRoundTripper(
 		upgrading,
@@ -313,6 +322,39 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		p.responder.Error(err)
 	})
 	proxy.ServeHTTP(writer, newReq)
+}
+
+// proxyTransportFor returns the round tripper used to proxy a request to the
+// managed cluster.
+//
+// For the cluster-proxy (konnectivity) endpoint it builds the transport from a
+// process-wide stable DialHolder so client-go's transport cache returns a single
+// pooled http.Transport per cluster credential instead of allocating a brand new
+// (uncacheable) transport — and a brand new gRPC tunnel — on every request, which
+// was the root cause of the gateway's memory/goroutine growth and eventual OOM.
+//
+// Per-request bearer-token and impersonation are NOT part of the transport cache
+// key; transport.New still applies them fresh on every call via
+// HTTPWrappersForConfig, so this caching does not leak one user's identity onto
+// another's request.
+func proxyTransportFor(cfg *restclient.Config, cluster *ClusterGateway) (http.RoundTripper, error) {
+	if cluster.Spec.Access.Endpoint.Type != ClusterEndpointTypeClusterProxy {
+		return restclient.TransportFor(cfg)
+	}
+	holder, err := ClusterProxyDialHolder()
+	if err != nil || holder == nil {
+		// Fall back to the previous (non-pooled) behavior if the shared dialer
+		// could not be initialized.
+		return restclient.TransportFor(cfg)
+	}
+	transportCfg, err := cfg.TransportConfig()
+	if err != nil {
+		return nil, err
+	}
+	// Replace the per-request DialHolder that TransportConfig() allocated with the
+	// shared, stable one so the transport cache can reuse a pooled http.Transport.
+	transportCfg.DialHolder = holder
+	return transport.New(transportCfg)
 }
 
 type noSuppressPanicError struct{}
