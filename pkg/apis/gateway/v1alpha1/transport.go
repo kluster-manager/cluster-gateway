@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -14,34 +15,60 @@ import (
 	"google.golang.org/grpc/keepalive"
 	k8snet "k8s.io/apimachinery/pkg/util/net"
 	restclient "k8s.io/client-go/rest"
+	k8stransport "k8s.io/client-go/transport"
 	konnectivity "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
-var DialerGetter = func(ctx context.Context) (k8snet.DialFunc, error) {
-	tlsCfg, err := util.GetClientTLSConfig(
-		config.ClusterProxyCAFile,
-		config.ClusterProxyCertFile,
-		config.ClusterProxyKeyFile,
-		config.ClusterProxyHost,
-		nil)
-	if err != nil {
-		return nil, err
-	}
-	dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnel(
-		ctx,
-		net.JoinHostPort(config.ClusterProxyHost, strconv.Itoa(config.ClusterProxyPort)),
-		grpc.WithTransportCredentials(grpccredentials.NewTLS(tlsCfg)),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time: time.Second * 5,
-		}),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return dialerTunnel.DialContext, nil
+// DialerGetter returns a dialer that creates a konnectivity tunnel on demand,
+// scoped to context.Background() so the connection it backs can be pooled.
+var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
+	proxyAddress := net.JoinHostPort(config.ClusterProxyHost, strconv.Itoa(config.ClusterProxyPort))
+	return func(ctx context.Context, _, addr string) (net.Conn, error) {
+		tlsCfg, err := util.GetClientTLSConfig(
+			config.ClusterProxyCAFile,
+			config.ClusterProxyCertFile,
+			config.ClusterProxyKeyFile,
+			config.ClusterProxyHost,
+			nil)
+		if err != nil {
+			return nil, err
+		}
+		dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnel(
+			context.Background(),
+			proxyAddress,
+			grpc.WithTransportCredentials(grpccredentials.NewTLS(tlsCfg)),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time: time.Second * 5,
+			}),
+		)
+		if err != nil {
+			return nil, err
+		}
+		return dialerTunnel.DialContext(ctx, "tcp", addr)
+	}, nil
+}
+
+var (
+	clusterProxyDialHolderOnce sync.Once
+	clusterProxyDialHolderInst *k8stransport.DialHolder
+	clusterProxyDialHolderErr  error
+)
+
+// ClusterProxyDialHolder returns a process-wide stable DialHolder so client-go's
+// transport cache can reuse one pooled http.Transport per cluster credential.
+func ClusterProxyDialHolder() (*k8stransport.DialHolder, error) {
+	clusterProxyDialHolderOnce.Do(func() {
+		dial, err := DialerGetter(context.Background())
+		if err != nil {
+			clusterProxyDialHolderErr = err
+			return
+		}
+		clusterProxyDialHolderInst = &k8stransport.DialHolder{Dial: dial}
+	})
+	return clusterProxyDialHolderInst, clusterProxyDialHolderErr
 }
 
 func NewConfigFromCluster(ctx context.Context, c *ClusterGateway) (*restclient.Config, error) {

@@ -264,7 +264,7 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		cfg.Impersonate = p.getImpersonationConfig(request)
 	}
 
-	rt, err := restclient.TransportFor(cfg)
+	rt, err := proxyTransportFor(cfg, cluster)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
 		return
@@ -297,9 +297,15 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating upgrader client %s", cluster.Name))
 		return
 	}
+	upgradeDial := cfg.Dial
+	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
+		if holder, herr := ClusterProxyDialHolder(); herr == nil && holder != nil {
+			upgradeDial = holder.Dial
+		}
+	}
 	upgrading := utilnet.SetOldTransportDefaults(&http.Transport{
 		TLSClientConfig: tlsConfig,
-		DialContext:     cfg.Dial,
+		DialContext:     upgradeDial,
 	})
 	proxy.UpgradeTransport = apiproxy.NewUpgradeRequestRoundTripper(
 		upgrading,
@@ -313,6 +319,24 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		p.responder.Error(err)
 	})
 	proxy.ServeHTTP(writer, newReq)
+}
+
+// proxyTransportFor returns the round tripper used to proxy a request. For the
+// cluster-proxy endpoint it injects the shared DialHolder so the transport is pooled.
+func proxyTransportFor(cfg *restclient.Config, cluster *ClusterGateway) (http.RoundTripper, error) {
+	if cluster.Spec.Access.Endpoint.Type != ClusterEndpointTypeClusterProxy {
+		return restclient.TransportFor(cfg)
+	}
+	holder, err := ClusterProxyDialHolder()
+	if err != nil || holder == nil {
+		return restclient.TransportFor(cfg)
+	}
+	transportCfg, err := cfg.TransportConfig()
+	if err != nil {
+		return nil, err
+	}
+	transportCfg.DialHolder = holder
+	return transport.New(transportCfg)
 }
 
 type noSuppressPanicError struct{}
