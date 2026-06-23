@@ -2,10 +2,12 @@ package v1alpha1
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +77,42 @@ func ClusterProxyDialHolder() (*k8stransport.DialHolder, error) {
 		clusterProxyDialHolderInst = &k8stransport.DialHolder{Dial: dial}
 	})
 	return clusterProxyDialHolderInst, clusterProxyDialHolderErr
+}
+
+var clusterProxyUpgradeTransports sync.Map // credential key -> *http.Transport
+
+// ClusterProxyUpgradeTransport returns a process-wide pooled upgrade (SPDY)
+// transport for the given credential, so exec/attach/port-forward requests reuse
+// one http.Transport per credential instead of allocating a fresh one per request.
+// The shared cluster-proxy DialHolder dial routes each connection to the right
+// cluster by address, so a single transport is safe to share across clusters that
+// present the same TLS credential. Entries are keyed by the credential material
+// and are not evicted, mirroring client-go's own (unbounded) tlsTransportCache.
+func ClusterProxyUpgradeTransport(transportCfg *k8stransport.Config, tlsConfig *tls.Config, dial k8snet.DialFunc) *http.Transport {
+	key := clusterProxyUpgradeKey(transportCfg)
+	if v, ok := clusterProxyUpgradeTransports.Load(key); ok {
+		return v.(*http.Transport)
+	}
+	t := k8snet.SetOldTransportDefaults(&http.Transport{
+		TLSClientConfig: tlsConfig,
+		DialContext:     dial,
+	})
+	actual, _ := clusterProxyUpgradeTransports.LoadOrStore(key, t)
+	return actual.(*http.Transport)
+}
+
+// clusterProxyUpgradeKey derives a cache key from the TLS credential material,
+// matching the fields client-go's transport cache keys on.
+func clusterProxyUpgradeKey(c *k8stransport.Config) string {
+	return strings.Join([]string{
+		strconv.FormatBool(c.TLS.Insecure),
+		c.TLS.ServerName,
+		string(c.TLS.CAData),
+		string(c.TLS.CertData),
+		string(c.TLS.KeyData),
+		c.TLS.CertFile,
+		c.TLS.KeyFile,
+	}, "\x00")
 }
 
 func NewConfigFromCluster(ctx context.Context, c *ClusterGateway) (*restclient.Config, error) {

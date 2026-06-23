@@ -299,15 +299,20 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	upgradeDial := cfg.Dial
+	var upgrading http.RoundTripper
 	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
 		if holder, herr := ClusterProxyDialHolder(); herr == nil && holder != nil {
 			upgradeDial = holder.Dial
 		}
+		// Reuse one pooled upgrade transport per credential; otherwise it is
+		// rebuilt on every exec/attach/port-forward request.
+		upgrading = ClusterProxyUpgradeTransport(transportCfg, tlsConfig, upgradeDial)
+	} else {
+		upgrading = utilnet.SetOldTransportDefaults(&http.Transport{
+			TLSClientConfig: tlsConfig,
+			DialContext:     upgradeDial,
+		})
 	}
-	upgrading := utilnet.SetOldTransportDefaults(&http.Transport{
-		TLSClientConfig: tlsConfig,
-		DialContext:     upgradeDial,
-	})
 	proxy.UpgradeTransport = apiproxy.NewUpgradeRequestRoundTripper(
 		upgrading,
 		RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
