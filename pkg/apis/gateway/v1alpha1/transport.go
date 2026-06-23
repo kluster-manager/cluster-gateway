@@ -24,22 +24,28 @@ import (
 
 // DialerGetter returns a dialer that creates a konnectivity tunnel on demand,
 // scoped to context.Background() so the connection it backs can be pooled.
+//
+// The client TLS material is read once here (when the dialer is built) rather
+// than on every dial, so it does not sit on the connection hot path. As a
+// consequence a rotation of the cluster-proxy client cert/key requires a
+// process restart to take effect.
 var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 	proxyAddress := net.JoinHostPort(config.ClusterProxyHost, strconv.Itoa(config.ClusterProxyPort))
+	tlsCfg, err := util.GetClientTLSConfig(
+		config.ClusterProxyCAFile,
+		config.ClusterProxyCertFile,
+		config.ClusterProxyKeyFile,
+		config.ClusterProxyHost,
+		nil)
+	if err != nil {
+		return nil, err
+	}
+	transportCreds := grpccredentials.NewTLS(tlsCfg)
 	return func(ctx context.Context, _, addr string) (net.Conn, error) {
-		tlsCfg, err := util.GetClientTLSConfig(
-			config.ClusterProxyCAFile,
-			config.ClusterProxyCertFile,
-			config.ClusterProxyKeyFile,
-			config.ClusterProxyHost,
-			nil)
-		if err != nil {
-			return nil, err
-		}
 		dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnel(
 			context.Background(),
 			proxyAddress,
-			grpc.WithTransportCredentials(grpccredentials.NewTLS(tlsCfg)),
+			grpc.WithTransportCredentials(transportCreds),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time: time.Second * 5,
 			}),
