@@ -264,7 +264,13 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		cfg.Impersonate = p.getImpersonationConfig(request)
 	}
 
-	rt, err := proxyTransportFor(cfg, cluster)
+	transportCfg, err := cfg.TransportConfig()
+	if err != nil {
+		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating transport config %s", cluster.Name))
+		return
+	}
+
+	rt, err := proxyTransportFor(transportCfg, cluster)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
 		return
@@ -282,11 +288,6 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		nil)
 
 	const defaultFlushInterval = 200 * time.Millisecond
-	transportCfg, err := cfg.TransportConfig()
-	if err != nil {
-		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating transport config %s", cluster.Name))
-		return
-	}
 	tlsConfig, err := transport.TLSConfigFor(transportCfg)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating tls config %s", cluster.Name))
@@ -323,9 +324,9 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 
 // proxyTransportFor returns the round tripper used to proxy a request. For the
 // cluster-proxy endpoint it injects the shared DialHolder so the transport is pooled.
-func proxyTransportFor(cfg *restclient.Config, cluster *ClusterGateway) (http.RoundTripper, error) {
+func proxyTransportFor(transportCfg *transport.Config, cluster *ClusterGateway) (http.RoundTripper, error) {
 	if cluster.Spec.Access.Endpoint.Type != ClusterEndpointTypeClusterProxy {
-		return restclient.TransportFor(cfg)
+		return transport.New(transportCfg)
 	}
 	holder, err := ClusterProxyDialHolder()
 	if err != nil {
@@ -333,10 +334,6 @@ func proxyTransportFor(cfg *restclient.Config, cluster *ClusterGateway) (http.Ro
 	}
 	if holder == nil {
 		return nil, errors.New("cluster proxy dial holder is nil")
-	}
-	transportCfg, err := cfg.TransportConfig()
-	if err != nil {
-		return nil, err
 	}
 	transportCfg.DialHolder = holder
 	return transport.New(transportCfg)
