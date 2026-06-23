@@ -328,8 +328,11 @@ func proxyTransportFor(cfg *restclient.Config, cluster *ClusterGateway) (http.Ro
 		return restclient.TransportFor(cfg)
 	}
 	holder, err := ClusterProxyDialHolder()
-	if err != nil || holder == nil {
-		return restclient.TransportFor(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if holder == nil {
+		return nil, errors.New("cluster proxy dial holder is nil")
 	}
 	transportCfg, err := cfg.TransportConfig()
 	if err != nil {
