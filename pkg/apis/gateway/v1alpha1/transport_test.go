@@ -29,6 +29,9 @@ func TestClusterRestConfigConversion(t *testing.T) {
 	DialerGetter = func(ctx context.Context) (k8snet.DialFunc, error) {
 		return testDialFunc, nil
 	}
+	// Reset the process-wide cluster-proxy caches so the overridden DialerGetter
+	// is the one memoized, independent of any earlier test in the package.
+	resetClusterProxyState()
 	cases := []struct {
 		name           string
 		clusterGateway *ClusterGateway
@@ -239,4 +242,17 @@ func TestClusterRestConfigConversion(t *testing.T) {
 		})
 	}
 
+}
+
+// resetClusterProxyState clears the process-wide cluster-proxy caches so a test
+// that overrides DialerGetter is not affected by state memoized by an earlier
+// test in the package.
+func resetClusterProxyState() {
+	clusterProxyDialHolderMu.Lock()
+	clusterProxyDialHolderInst = nil
+	clusterProxyDialHolderMu.Unlock()
+
+	clusterProxyUpgradeMu.Lock()
+	clusterProxyUpgradeTransports = map[string]*clusterProxyUpgradeEntry{}
+	clusterProxyUpgradeMu.Unlock()
 }

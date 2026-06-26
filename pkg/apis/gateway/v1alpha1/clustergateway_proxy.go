@@ -264,7 +264,27 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		cfg.Impersonate = p.getImpersonationConfig(request)
 	}
 
-	rt, err := restclient.TransportFor(cfg)
+	transportCfg, err := cfg.TransportConfig()
+	if err != nil {
+		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating transport config %s", cluster.Name))
+		return
+	}
+
+	// Both the proxied transport and the upgrade transport need the shared
+	// cluster-proxy DialHolder pointer (the proxied path injects it as the
+	// transport-cache key, the upgrade path uses its Dial). ClusterProxyDialHolder
+	// is memoized and NewConfigFromCluster already resolved it above, so this
+	// returns the cached holder; the error branch is a defensive fail-closed guard.
+	var dialHolder *transport.DialHolder
+	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
+		dialHolder, err = ClusterProxyDialHolder()
+		if err != nil {
+			responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed resolving cluster proxy dial holder %s", cluster.Name))
+			return
+		}
+	}
+
+	rt, err := proxyTransportFor(transportCfg, dialHolder)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
 		return
@@ -282,25 +302,34 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		nil)
 
 	const defaultFlushInterval = 200 * time.Millisecond
-	transportCfg, err := cfg.TransportConfig()
-	if err != nil {
-		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating transport config %s", cluster.Name))
-		return
-	}
-	tlsConfig, err := transport.TLSConfigFor(transportCfg)
-	if err != nil {
-		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating tls config %s", cluster.Name))
-		return
-	}
 	upgrader, err := transport.HTTPWrappersForConfig(transportCfg, apiproxy.MirrorRequest)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating upgrader client %s", cluster.Name))
 		return
 	}
-	upgrading := utilnet.SetOldTransportDefaults(&http.Transport{
-		TLSClientConfig: tlsConfig,
-		DialContext:     cfg.Dial,
-	})
+	var upgrading http.RoundTripper
+	if dialHolder != nil {
+		// Reuse one pooled upgrade transport per cluster; otherwise it is
+		// rebuilt on every exec/attach/port-forward request.
+		upgrading, err = ClusterProxyUpgradeTransport(cluster.Name, transportCfg, dialHolder.Dial)
+		if err != nil {
+			responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating upgrade transport %s", cluster.Name))
+			return
+		}
+	} else {
+		// Build the tls.Config only on this (non-pooled) path; the pooled path
+		// derives it lazily on a cache miss.
+		tlsConfig, terr := transport.TLSConfigFor(transportCfg)
+		if terr != nil {
+			responsewriters.InternalError(writer, request, errors.Wrapf(terr, "failed creating tls config %s", cluster.Name))
+			return
+		}
+		upgrading = utilnet.SetOldTransportDefaults(&http.Transport{
+			TLSClientConfig: tlsConfig,
+			DialContext:     cfg.Dial,
+			Proxy:           cfg.Proxy,
+		})
+	}
 	proxy.UpgradeTransport = apiproxy.NewUpgradeRequestRoundTripper(
 		upgrading,
 		RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -313,6 +342,16 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		p.responder.Error(err)
 	})
 	proxy.ServeHTTP(writer, newReq)
+}
+
+// proxyTransportFor returns the round tripper used to proxy a request. When a
+// cluster-proxy dial holder is supplied it is injected so client-go's transport
+// cache pools one http.Transport per credential across requests.
+func proxyTransportFor(transportCfg *transport.Config, dialHolder *transport.DialHolder) (http.RoundTripper, error) {
+	if dialHolder != nil {
+		transportCfg.DialHolder = dialHolder
+	}
+	return transport.New(transportCfg)
 }
 
 type noSuppressPanicError struct{}
