@@ -24,6 +24,11 @@ import (
 	k8stesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/pointer"
 	contextutil "sigs.k8s.io/apiserver-runtime/pkg/util/context"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	authv1alpha1 "github.com/kluster-manager/cluster-auth/apis/authentication/v1alpha1"
+	"github.com/kluster-manager/cluster-gateway/pkg/featuregates"
+	"github.com/kluster-manager/cluster-gateway/pkg/util/singleton"
 )
 
 func TestProxyHandler(t *testing.T) {
@@ -139,8 +144,12 @@ func TestProxyHandler(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// These cases exercise proxying and query escaping, not identity
+			// exchange; disable impersonation (on by default) so the handler does
+			// not try to resolve a user from the httptest request context.
+			k8stesting.SetFeatureGateDuringTest(t, feature.DefaultMutableFeatureGate, featuregates.ClientIdentityPenetration, false)
 			if len(c.featureGate) > 0 {
-				defer k8stesting.SetFeatureGateDuringTest(t, feature.DefaultMutableFeatureGate, c.featureGate, true)()
+				k8stesting.SetFeatureGateDuringTest(t, feature.DefaultMutableFeatureGate, c.featureGate, true)
 			}
 			text := "ok"
 			var receivingReq *http.Request
@@ -229,6 +238,13 @@ func TestGetImpersonationConfig(t *testing.T) {
 	require.NoError(t, err)
 	base := context.Background()
 
+	// The fall-through path looks up an Account via the singleton client; back it
+	// with a fake client that has no accounts so the lookup returns NotFound and
+	// the user's own identity is impersonated.
+	scheme := runtime.NewScheme()
+	require.NoError(t, authv1alpha1.AddToScheme(scheme))
+	singleton.SetClient(ctrlfake.NewClientBuilder().WithScheme(scheme).Build())
+
 	GlobalClusterGatewayProxyConfiguration = &ClusterGatewayProxyConfiguration{
 		Spec: ClusterGatewayProxyConfigurationSpec{
 			ClientIdentityExchanger: ClientIdentityExchanger{Rules: []ClientIdentityExchangeRule{{
@@ -258,5 +274,5 @@ func TestGetImpersonationConfig(t *testing.T) {
 	require.Equal(t, clientgorest.ImpersonationConfig{UserName: "global"}, h.getImpersonationConfig(baseReq.WithContext(ctx)))
 
 	ctx = request.WithUser(base, &user.DefaultInfo{Name: "tester", Groups: []string{"group-test"}})
-	require.Equal(t, clientgorest.ImpersonationConfig{UserName: "tester", Groups: []string{"group-test"}}, h.getImpersonationConfig(baseReq.WithContext(ctx)))
+	require.Equal(t, clientgorest.ImpersonationConfig{UserName: "tester", Groups: []string{"group-test"}, Extra: map[string][]string{}}, h.getImpersonationConfig(baseReq.WithContext(ctx)))
 }
