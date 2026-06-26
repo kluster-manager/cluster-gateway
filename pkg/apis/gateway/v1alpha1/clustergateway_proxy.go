@@ -279,10 +279,6 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 			responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed resolving cluster proxy dial holder %s", cluster.Name))
 			return
 		}
-		if dialHolder == nil {
-			responsewriters.InternalError(writer, request, fmt.Errorf("cluster proxy dial holder is nil for cluster %s", cluster.Name))
-			return
-		}
 	}
 
 	rt, err := proxyTransportFor(transportCfg, dialHolder)
