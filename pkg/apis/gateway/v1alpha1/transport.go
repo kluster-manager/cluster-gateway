@@ -2,12 +2,13 @@ package v1alpha1
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,9 +29,11 @@ import (
 // scoped to context.Background() so the connection it backs can be pooled.
 //
 // The client TLS material is read once here (when the dialer is built) rather
-// than on every dial, so it does not sit on the connection hot path. As a
-// consequence a rotation of the cluster-proxy client cert/key requires a
-// process restart to take effect.
+// than on every dial, so it does not sit on the connection hot path. The client
+// cert/key are reloaded lazily through tls.Config.GetClientCertificate when the
+// files change, so a rotation of the cluster-proxy client cert/key is picked up
+// on the next tunnel without a process restart. (Rotation of the CA bundle still
+// requires a restart.)
 var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 	proxyAddress := net.JoinHostPort(config.ClusterProxyHost, strconv.Itoa(config.ClusterProxyPort))
 	tlsCfg, err := util.GetClientTLSConfig(
@@ -41,6 +44,13 @@ var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 		nil)
 	if err != nil {
 		return nil, err
+	}
+	// Reload the client cert/key on rotation instead of pinning the copy read
+	// above for the lifetime of the process.
+	if config.ClusterProxyCertFile != "" || config.ClusterProxyKeyFile != "" {
+		reloader := &reloadingClientCert{certFile: config.ClusterProxyCertFile, keyFile: config.ClusterProxyKeyFile}
+		tlsCfg.Certificates = nil
+		tlsCfg.GetClientCertificate = reloader.getClientCertificate
 	}
 	transportCreds := grpccredentials.NewTLS(tlsCfg)
 	return func(ctx context.Context, _, addr string) (net.Conn, error) {
@@ -59,60 +69,127 @@ var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 	}, nil
 }
 
+// reloadingClientCert loads the cluster-proxy client cert/key from disk and
+// re-reads them when the files change, so cert rotation does not require a
+// process restart. tls.Config calls getClientCertificate once per handshake.
+type reloadingClientCert struct {
+	certFile, keyFile string
+
+	mu      sync.Mutex
+	cert    *tls.Certificate
+	modCert time.Time
+	modKey  time.Time
+}
+
+func (r *reloadingClientCert) getClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	certInfo, err := os.Stat(r.certFile)
+	if err != nil {
+		return nil, err
+	}
+	keyInfo, err := os.Stat(r.keyFile)
+	if err != nil {
+		return nil, err
+	}
+	if r.cert == nil || certInfo.ModTime().After(r.modCert) || keyInfo.ModTime().After(r.modKey) {
+		cert, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+		if err != nil {
+			return nil, err
+		}
+		r.cert = &cert
+		r.modCert = certInfo.ModTime()
+		r.modKey = keyInfo.ModTime()
+	}
+	return r.cert, nil
+}
+
 var (
-	clusterProxyDialHolderOnce sync.Once
+	clusterProxyDialHolderMu   sync.Mutex
 	clusterProxyDialHolderInst *k8stransport.DialHolder
-	clusterProxyDialHolderErr  error
 )
 
 // ClusterProxyDialHolder returns a process-wide stable DialHolder so client-go's
 // transport cache can reuse one pooled http.Transport per cluster credential.
+//
+// The holder is built lazily and only memoized on success, so a transient
+// failure (e.g. the cluster-proxy client certs not yet mounted at startup) is
+// retried on the next call instead of bricking cluster-proxy until a restart.
 func ClusterProxyDialHolder() (*k8stransport.DialHolder, error) {
-	clusterProxyDialHolderOnce.Do(func() {
-		dial, err := DialerGetter(context.Background())
-		if err != nil {
-			clusterProxyDialHolderErr = err
-			return
-		}
-		clusterProxyDialHolderInst = &k8stransport.DialHolder{Dial: dial}
-	})
-	return clusterProxyDialHolderInst, clusterProxyDialHolderErr
+	clusterProxyDialHolderMu.Lock()
+	defer clusterProxyDialHolderMu.Unlock()
+	if clusterProxyDialHolderInst != nil {
+		return clusterProxyDialHolderInst, nil
+	}
+	dial, err := DialerGetter(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	clusterProxyDialHolderInst = &k8stransport.DialHolder{Dial: dial}
+	return clusterProxyDialHolderInst, nil
 }
 
-var clusterProxyUpgradeTransports sync.Map // credential key -> *http.Transport
+type clusterProxyUpgradeEntry struct {
+	credKey   string
+	transport *http.Transport
+}
 
-// ClusterProxyUpgradeTransport returns a process-wide pooled upgrade (SPDY)
-// transport for the given credential, so exec/attach/port-forward requests reuse
-// one http.Transport per credential instead of allocating a fresh one per request.
-// The shared cluster-proxy DialHolder dial routes each connection to the right
-// cluster by address, so a single transport is safe to share across clusters that
-// present the same TLS credential. Entries are keyed by the credential material
-// and are not evicted, mirroring client-go's own (unbounded) tlsTransportCache.
-func ClusterProxyUpgradeTransport(transportCfg *k8stransport.Config, tlsConfig *tls.Config, dial k8snet.DialFunc) *http.Transport {
-	key := clusterProxyUpgradeKey(transportCfg)
-	if v, ok := clusterProxyUpgradeTransports.Load(key); ok {
-		return v.(*http.Transport)
+var (
+	clusterProxyUpgradeMu         sync.Mutex
+	clusterProxyUpgradeTransports = map[string]*clusterProxyUpgradeEntry{}
+)
+
+// ClusterProxyUpgradeTransport returns a pooled upgrade (SPDY) transport for the
+// given cluster, so exec/attach/port-forward requests reuse one http.Transport
+// per cluster instead of allocating a fresh one per request. The shared
+// cluster-proxy DialHolder dial routes each connection to the right cluster by
+// address. The cache is keyed by cluster name and is bounded by the number of
+// clusters: when a cluster's credential rotates, the stale transport's idle
+// connections are dropped and it is replaced rather than accumulated.
+func ClusterProxyUpgradeTransport(clusterName string, transportCfg *k8stransport.Config, dial k8snet.DialFunc) (*http.Transport, error) {
+	credKey := clusterProxyUpgradeKey(transportCfg)
+
+	clusterProxyUpgradeMu.Lock()
+	defer clusterProxyUpgradeMu.Unlock()
+	if entry, ok := clusterProxyUpgradeTransports[clusterName]; ok {
+		if entry.credKey == credKey {
+			return entry.transport, nil
+		}
+		// Credential rotated: drop the stale transport's pooled connections
+		// before replacing it so we do not leak idle tunnels.
+		entry.transport.CloseIdleConnections()
+	}
+
+	tlsConfig, err := k8stransport.TLSConfigFor(transportCfg)
+	if err != nil {
+		return nil, err
 	}
 	t := k8snet.SetOldTransportDefaults(&http.Transport{
 		TLSClientConfig: tlsConfig,
 		DialContext:     dial,
 	})
-	actual, _ := clusterProxyUpgradeTransports.LoadOrStore(key, t)
-	return actual.(*http.Transport)
+	clusterProxyUpgradeTransports[clusterName] = &clusterProxyUpgradeEntry{credKey: credKey, transport: t}
+	return t, nil
 }
 
-// clusterProxyUpgradeKey derives a cache key from the TLS credential material,
-// matching the fields client-go's transport cache keys on.
+// clusterProxyUpgradeKey is a cheap fingerprint of the TLS credential material,
+// used only to detect when a cluster's credential has rotated. It is a private
+// hash, not a reimplementation of client-go's transport-cache key.
 func clusterProxyUpgradeKey(c *k8stransport.Config) string {
-	return strings.Join([]string{
-		strconv.FormatBool(c.TLS.Insecure),
-		c.TLS.ServerName,
-		string(c.TLS.CAData),
-		string(c.TLS.CertData),
-		string(c.TLS.KeyData),
-		c.TLS.CertFile,
-		c.TLS.KeyFile,
-	}, "\x00")
+	h := sha256.New()
+	writeField := func(b []byte) {
+		_, _ = h.Write(b)
+		_, _ = h.Write([]byte{0})
+	}
+	writeField([]byte(strconv.FormatBool(c.TLS.Insecure)))
+	writeField([]byte(c.TLS.ServerName))
+	writeField(c.TLS.CAData)
+	writeField(c.TLS.CertData)
+	writeField(c.TLS.KeyData)
+	writeField([]byte(c.TLS.CertFile))
+	writeField([]byte(c.TLS.KeyFile))
+	return string(h.Sum(nil))
 }
 
 func NewConfigFromCluster(ctx context.Context, c *ClusterGateway) (*restclient.Config, error) {

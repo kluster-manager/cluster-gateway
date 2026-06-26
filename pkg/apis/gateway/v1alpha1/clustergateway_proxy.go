@@ -270,7 +270,22 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	rt, err := proxyTransportFor(transportCfg, cluster)
+	// Resolve the shared cluster-proxy dial holder once and fail closed if it is
+	// unavailable; both the proxied transport and the upgrade transport use it.
+	var dialHolder *transport.DialHolder
+	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
+		dialHolder, err = ClusterProxyDialHolder()
+		if err != nil {
+			responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed resolving cluster proxy dial holder %s", cluster.Name))
+			return
+		}
+		if dialHolder == nil {
+			responsewriters.InternalError(writer, request, fmt.Errorf("cluster proxy dial holder is nil for cluster %s", cluster.Name))
+			return
+		}
+	}
+
+	rt, err := proxyTransportFor(transportCfg, dialHolder)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating cluster proxy client %s", cluster.Name))
 		return
@@ -288,29 +303,32 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		nil)
 
 	const defaultFlushInterval = 200 * time.Millisecond
-	tlsConfig, err := transport.TLSConfigFor(transportCfg)
-	if err != nil {
-		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating tls config %s", cluster.Name))
-		return
-	}
 	upgrader, err := transport.HTTPWrappersForConfig(transportCfg, apiproxy.MirrorRequest)
 	if err != nil {
 		responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating upgrader client %s", cluster.Name))
 		return
 	}
-	upgradeDial := cfg.Dial
 	var upgrading http.RoundTripper
-	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
-		if holder, herr := ClusterProxyDialHolder(); herr == nil && holder != nil {
-			upgradeDial = holder.Dial
-		}
-		// Reuse one pooled upgrade transport per credential; otherwise it is
+	if dialHolder != nil {
+		// Reuse one pooled upgrade transport per cluster; otherwise it is
 		// rebuilt on every exec/attach/port-forward request.
-		upgrading = ClusterProxyUpgradeTransport(transportCfg, tlsConfig, upgradeDial)
+		upgrading, err = ClusterProxyUpgradeTransport(cluster.Name, transportCfg, dialHolder.Dial)
+		if err != nil {
+			responsewriters.InternalError(writer, request, errors.Wrapf(err, "failed creating upgrade transport %s", cluster.Name))
+			return
+		}
 	} else {
+		// Build the tls.Config only on this (non-pooled) path; the pooled path
+		// derives it lazily on a cache miss.
+		tlsConfig, terr := transport.TLSConfigFor(transportCfg)
+		if terr != nil {
+			responsewriters.InternalError(writer, request, errors.Wrapf(terr, "failed creating tls config %s", cluster.Name))
+			return
+		}
 		upgrading = utilnet.SetOldTransportDefaults(&http.Transport{
 			TLSClientConfig: tlsConfig,
-			DialContext:     upgradeDial,
+			DialContext:     cfg.Dial,
+			Proxy:           cfg.Proxy,
 		})
 	}
 	proxy.UpgradeTransport = apiproxy.NewUpgradeRequestRoundTripper(
@@ -327,20 +345,13 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 	proxy.ServeHTTP(writer, newReq)
 }
 
-// proxyTransportFor returns the round tripper used to proxy a request. For the
-// cluster-proxy endpoint it injects the shared DialHolder so the transport is pooled.
-func proxyTransportFor(transportCfg *transport.Config, cluster *ClusterGateway) (http.RoundTripper, error) {
-	if cluster.Spec.Access.Endpoint.Type != ClusterEndpointTypeClusterProxy {
-		return transport.New(transportCfg)
+// proxyTransportFor returns the round tripper used to proxy a request. When a
+// cluster-proxy dial holder is supplied it is injected so client-go's transport
+// cache pools one http.Transport per credential across requests.
+func proxyTransportFor(transportCfg *transport.Config, dialHolder *transport.DialHolder) (http.RoundTripper, error) {
+	if dialHolder != nil {
+		transportCfg.DialHolder = dialHolder
 	}
-	holder, err := ClusterProxyDialHolder()
-	if err != nil {
-		return nil, err
-	}
-	if holder == nil {
-		return nil, errors.New("cluster proxy dial holder is nil")
-	}
-	transportCfg.DialHolder = holder
 	return transport.New(transportCfg)
 }
 
