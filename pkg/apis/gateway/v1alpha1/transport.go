@@ -133,7 +133,15 @@ func ClusterProxyDialHolder() (*k8stransport.DialHolder, error) {
 type clusterProxyUpgradeEntry struct {
 	credKey   string
 	transport *http.Transport
+	lastUsed  time.Time
 }
+
+// clusterProxyUpgradeTransportCap caps the upgrade-transport cache so it cannot
+// grow without bound. Entries are keyed by cluster name and there is no
+// cluster-deletion hook at this layer, so a fleet whose cluster names churn over
+// time would otherwise accumulate one transport per name forever. Far more than
+// any realistic live cluster count, this only evicts genuinely stale entries.
+const clusterProxyUpgradeTransportCap = 1024
 
 var (
 	clusterProxyUpgradeMu         sync.Mutex
@@ -144,9 +152,10 @@ var (
 // given cluster, so exec/attach/port-forward requests reuse one http.Transport
 // per cluster instead of allocating a fresh one per request. The shared
 // cluster-proxy DialHolder dial routes each connection to the right cluster by
-// address. The cache is keyed by cluster name and is bounded by the number of
-// clusters: when a cluster's credential rotates, the stale transport's idle
-// connections are dropped and it is replaced rather than accumulated.
+// address. The cache is keyed by cluster name; when a cluster's credential
+// rotates the stale transport's idle connections are dropped and it is replaced,
+// and the cache is bounded to clusterProxyUpgradeTransportCap entries (evicting
+// the least-recently-used) so it cannot grow without bound under name churn.
 func ClusterProxyUpgradeTransport(clusterName string, transportCfg *k8stransport.Config, dial k8snet.DialFunc) (*http.Transport, error) {
 	credKey := clusterProxyUpgradeKey(transportCfg)
 
@@ -154,6 +163,7 @@ func ClusterProxyUpgradeTransport(clusterName string, transportCfg *k8stransport
 	defer clusterProxyUpgradeMu.Unlock()
 	if entry, ok := clusterProxyUpgradeTransports[clusterName]; ok {
 		if entry.credKey == credKey {
+			entry.lastUsed = time.Now()
 			return entry.transport, nil
 		}
 		// Credential rotated: drop the stale transport's pooled connections
@@ -169,8 +179,32 @@ func ClusterProxyUpgradeTransport(clusterName string, transportCfg *k8stransport
 		TLSClientConfig: tlsConfig,
 		DialContext:     dial,
 	})
-	clusterProxyUpgradeTransports[clusterName] = &clusterProxyUpgradeEntry{credKey: credKey, transport: t}
+	evictStaleUpgradeTransportsLocked(clusterName)
+	clusterProxyUpgradeTransports[clusterName] = &clusterProxyUpgradeEntry{credKey: credKey, transport: t, lastUsed: time.Now()}
 	return t, nil
+}
+
+// evictStaleUpgradeTransportsLocked drops the least-recently-used entries (other
+// than keepName, which is about to be (re)inserted) until there is room for one
+// more. Callers hold clusterProxyUpgradeMu.
+func evictStaleUpgradeTransportsLocked(keepName string) {
+	for len(clusterProxyUpgradeTransports) >= clusterProxyUpgradeTransportCap {
+		var oldestName string
+		var oldest time.Time
+		for name, entry := range clusterProxyUpgradeTransports {
+			if name == keepName {
+				continue
+			}
+			if oldestName == "" || entry.lastUsed.Before(oldest) {
+				oldestName, oldest = name, entry.lastUsed
+			}
+		}
+		if oldestName == "" {
+			return
+		}
+		clusterProxyUpgradeTransports[oldestName].transport.CloseIdleConnections()
+		delete(clusterProxyUpgradeTransports, oldestName)
+	}
 }
 
 // clusterProxyUpgradeKey is a cheap fingerprint of the TLS credential material,
