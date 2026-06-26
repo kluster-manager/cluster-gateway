@@ -1,9 +1,11 @@
 package v1alpha1
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,44 +22,38 @@ import (
 	restclient "k8s.io/client-go/rest"
 	k8stransport "k8s.io/client-go/transport"
 	konnectivity "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
 )
 
+// clusterProxyTLSReloadInterval bounds how often the cluster-proxy TLS material
+// is re-read from disk on the dial path.
+const clusterProxyTLSReloadInterval = 30 * time.Second
+
 // DialerGetter returns a dialer that creates a konnectivity tunnel on demand,
 // scoped to context.Background() so the connection it backs can be pooled.
 //
-// The client TLS material is read once here (when the dialer is built) rather
-// than on every dial, so it does not sit on the connection hot path. The client
-// cert/key are reloaded lazily through tls.Config.GetClientCertificate when the
-// files change, so a rotation of the cluster-proxy client cert/key is picked up
-// on the next tunnel without a process restart. (Rotation of the CA bundle still
-// requires a restart.)
+// The client cert/key and the CA bundle are reloaded from disk by content (not
+// mtime), at most once per clusterProxyTLSReloadInterval, so a rotation of any
+// of them is picked up on the next tunnel without a process restart, while the
+// read stays off the per-handshake hot path. A transient read error falls back
+// to the last good material so an in-flight rotation does not break dials.
 var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 	proxyAddress := net.JoinHostPort(config.ClusterProxyHost, strconv.Itoa(config.ClusterProxyPort))
-	tlsCfg, err := util.GetClientTLSConfig(
+	reloader, err := newReloadingTLS(
 		config.ClusterProxyCAFile,
 		config.ClusterProxyCertFile,
 		config.ClusterProxyKeyFile,
 		config.ClusterProxyHost,
-		nil)
+	)
 	if err != nil {
 		return nil, err
 	}
-	// Reload the client cert/key on rotation instead of pinning the copy read
-	// above for the lifetime of the process.
-	if config.ClusterProxyCertFile != "" || config.ClusterProxyKeyFile != "" {
-		reloader := &reloadingClientCert{certFile: config.ClusterProxyCertFile, keyFile: config.ClusterProxyKeyFile}
-		tlsCfg.Certificates = nil
-		tlsCfg.GetClientCertificate = reloader.getClientCertificate
-	}
-	transportCreds := grpccredentials.NewTLS(tlsCfg)
 	return func(ctx context.Context, _, addr string) (net.Conn, error) {
 		dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnel(
 			context.Background(),
 			proxyAddress,
-			grpc.WithTransportCredentials(transportCreds),
+			grpc.WithTransportCredentials(grpccredentials.NewTLS(reloader.tlsConfig())),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time: time.Second * 5,
 			}),
@@ -69,40 +65,131 @@ var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 	}, nil
 }
 
-// reloadingClientCert loads the cluster-proxy client cert/key from disk and
-// re-reads them when the files change, so cert rotation does not require a
-// process restart. tls.Config calls getClientCertificate once per handshake.
-type reloadingClientCert struct {
-	certFile, keyFile string
+// reloadingTLS reloads the cluster-proxy CA bundle and client cert/key from disk
+// and hands out a fresh *tls.Config for each new konnectivity tunnel, so both
+// client-cert and CA rotation are picked up without a process restart. It reads
+// the files at most once per reload interval and compares by content, and keeps
+// the last good material if a re-read transiently fails (e.g. the brief window
+// while a Kubernetes secret's ..data symlink is swapped). It mirrors the
+// semantics of client-go's dynamicClientCert/cachingCertificateLoader for a path
+// that feeds gRPC transport credentials rather than an http.Transport.
+type reloadingTLS struct {
+	caFile, certFile, keyFile, serverName string
 
-	mu      sync.Mutex
-	cert    *tls.Certificate
-	modCert time.Time
-	modKey  time.Time
+	mu        sync.Mutex
+	lastCheck time.Time
+	caPool    *x509.CertPool
+	caData    []byte
+	cert      *tls.Certificate
+	// onRotate, if set, is invoked (with mu held) when the cert or CA changes
+	// after the initial load — used to drop pooled connections on rotation.
+	onRotate func()
 }
 
-func (r *reloadingClientCert) getClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+func newReloadingTLS(caFile, certFile, keyFile, serverName string) (*reloadingTLS, error) {
+	r := &reloadingTLS{caFile: caFile, certFile: certFile, keyFile: keyFile, serverName: serverName}
+	// Load once up front so a misconfiguration fails fast at dialer-build time
+	// rather than on the first proxied request.
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.reloadLocked(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
 
-	certInfo, err := os.Stat(r.certFile)
-	if err != nil {
-		return nil, err
+// tlsConfig returns a fresh *tls.Config carrying the current CA pool and client
+// certificate, refreshing them from disk if the reload interval has elapsed.
+func (r *reloadingTLS) tlsConfig() *tls.Config {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if time.Since(r.lastCheck) >= clusterProxyTLSReloadInterval {
+		// Best effort: reloadLocked keeps the last good material on error.
+		_ = r.reloadLocked()
 	}
-	keyInfo, err := os.Stat(r.keyFile)
-	if err != nil {
-		return nil, err
+	cfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: r.serverName,
+		RootCAs:    r.caPool,
 	}
-	if r.cert == nil || certInfo.ModTime().After(r.modCert) || keyInfo.ModTime().After(r.modKey) {
-		cert, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+	if r.cert != nil {
+		cfg.Certificates = []tls.Certificate{*r.cert}
+	}
+	return cfg
+}
+
+// reloadLocked re-reads the CA and cert/key files. Callers hold r.mu. On a read
+// error it returns the error but leaves the previously loaded material in place
+// (when any) so transient failures do not break dials; the initial load (when
+// nothing is cached yet) surfaces the error to the caller.
+func (r *reloadingTLS) reloadLocked() error {
+	r.lastCheck = time.Now()
+
+	caData := r.caData
+	caPool := r.caPool
+	if r.caFile != "" {
+		data, err := os.ReadFile(r.caFile)
 		if err != nil {
-			return nil, err
+			if r.caPool == nil {
+				return err
+			}
+			return nil
 		}
-		r.cert = &cert
-		r.modCert = certInfo.ModTime()
-		r.modKey = keyInfo.ModTime()
+		caData = data
 	}
-	return r.cert, nil
+
+	var cert *tls.Certificate
+	if r.certFile != "" || r.keyFile != "" {
+		loaded, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+		if err != nil {
+			if r.cert == nil {
+				return err
+			}
+			return nil
+		}
+		cert = &loaded
+	}
+
+	caChanged := !bytes.Equal(caData, r.caData)
+	if caChanged {
+		pool := x509.NewCertPool()
+		if len(caData) > 0 && !pool.AppendCertsFromPEM(caData) {
+			if r.caPool == nil {
+				return errors.Errorf("failed to parse cluster-proxy CA bundle %s", r.caFile)
+			}
+			caChanged = false
+		} else {
+			caPool = pool
+		}
+	}
+
+	certChanged := !certsEqual(r.cert, cert)
+	had := r.caPool != nil || r.cert != nil
+
+	r.caData = caData
+	r.caPool = caPool
+	r.cert = cert
+
+	if had && (caChanged || certChanged) && r.onRotate != nil {
+		r.onRotate()
+	}
+	return nil
+}
+
+// certsEqual reports whether two client certificates carry the same leaf chain.
+func certsEqual(a, b *tls.Certificate) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if len(a.Certificate) != len(b.Certificate) {
+		return false
+	}
+	for i := range a.Certificate {
+		if !bytes.Equal(a.Certificate[i], b.Certificate[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 var (

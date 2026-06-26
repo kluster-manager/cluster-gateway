@@ -395,8 +395,6 @@ open-cluster-management.io/managed-serviceaccount v0.9.0 h1:YK2AwVyjDF3IJGv48+Nc
 open-cluster-management.io/managed-serviceaccount v0.9.0/go.mod h1:q/pASWYWNEz3AodqKWphmMvK0IdmlWYltwDicjYBizs=
 open-cluster-management.io/sdk-go v1.2.0 h1:O9LCOoy5JfgK3k4e2OCBY2ZoCqBEwLbEWClqP01FkQI=
 open-cluster-management.io/sdk-go v1.2.0/go.mod h1:OHM74Kw1gh9RHxg7QjJlGXCDlPm7x2CtCkejHSdczs4=
-sigs.k8s.io/apiserver-network-proxy v0.34.0 h1:6u4x2V71KNHGD7x4Gl20/DH8o8HCskcySfgU1iGemVk=
-sigs.k8s.io/apiserver-network-proxy v0.34.0/go.mod h1:b6SA51XinSmfALGvbUxbA7R9D5E7mAtaVhzBQCOj03M=
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.31.2 h1:jpcvIRr3GLoUoEKRkHKSmGjxb6lWwrBlJsXc+eUYQHM=
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.31.2/go.mod h1:Ve9uj1L+deCXFrPOk1LpFXqTg7LCFzFso6PA48q/XZw=
 sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 h1:gBQPwqORJ8d8/YNZWEjoZs7npUVDpVXUUOFfW6CgAqE=
