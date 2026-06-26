@@ -46,13 +46,13 @@ jobs:
         with:
           submodules: true
       - name: Cache Go Dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@8492260343ad570701412c2f464a5877dc76bace # v2
         with:
           path: .work/pkg
           key: ${{ runner.os }}-pkg-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-pkg-
       - name: install Kubebuilder
-        uses: RyanSiu1995/kubebuilder-action@v1.2
+        uses: RyanSiu1995/kubebuilder-action@0bb0adef70bbf9c58f6f63c180387b4bdaf102f7 # v1.2
         with:
           version: 3.1.0
           kubebuilderOnly: false
@@ -60,7 +60,7 @@ jobs:
       - name: Run Make test
         run: make test
       - name: Upload coverage report
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@ab904c41d6ece82784817410c45d8b8c02684457 # v3.1.6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: cover.out
@@ -86,7 +86,7 @@ jobs:
         with:
           submodules: true
       - name: Cache Go Dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@8492260343ad570701412c2f464a5877dc76bace # v2
         with:
           path: .work/pkg
           key: ${{ runner.os }}-pkg-${{ hashFiles('**/go.sum') }}
@@ -125,7 +125,7 @@ jobs:
         with:
           submodules: true
       - name: Cache Go Dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@8492260343ad570701412c2f464a5877dc76bace # v2
         with:
           path: .work/pkg
           key: ${{ runner.os }}-pkg-${{ hashFiles('**/go.sum') }}
