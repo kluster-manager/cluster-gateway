@@ -234,11 +234,17 @@ func NewConfigFromCluster(ctx context.Context, c *ClusterGateway) (*restclient.C
 		cfg.Host = c.Name // the same as the cluster name
 		cfg.Insecure = true
 		cfg.CAData = nil
-		dail, err := DialerGetter(ctx)
+		// Reuse the process-wide pooled dialer instead of building one (and
+		// reading the client TLS material from disk) on every request. ServeHTTP
+		// injects the same shared DialHolder, so a per-request dialer here would
+		// only be built and discarded; routing every consumer of this config
+		// through the pooled holder also keeps connection pooling from depending
+		// on which caller built the transport.
+		holder, err := ClusterProxyDialHolder()
 		if err != nil {
 			return nil, err
 		}
-		cfg.Dial = dail
+		cfg.Dial = holder.Dial
 	}
 	// setting up credentials
 	switch c.Spec.Access.Credential.Type {
