@@ -21,6 +21,7 @@ import (
 	k8snet "k8s.io/apimachinery/pkg/util/net"
 	restclient "k8s.io/client-go/rest"
 	k8stransport "k8s.io/client-go/transport"
+	"k8s.io/client-go/util/connrotation"
 	konnectivity "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 
 	"github.com/kluster-manager/cluster-gateway/pkg/config"
@@ -49,7 +50,11 @@ var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, _, addr string) (net.Conn, error) {
+	// Route every konnectivity tunnel through a connrotation.Dialer so that on a
+	// cert/CA rotation we can close the pooled tunnels and force them to re-dial
+	// with the new material, instead of leaving warm connections authenticating
+	// with the old credential until they idle out.
+	connDialer := connrotation.NewDialer(func(ctx context.Context, _, addr string) (net.Conn, error) {
 		dialerTunnel, err := konnectivity.CreateSingleUseGrpcTunnel(
 			context.Background(),
 			proxyAddress,
@@ -62,6 +67,10 @@ var DialerGetter = func(_ context.Context) (k8snet.DialFunc, error) {
 			return nil, err
 		}
 		return dialerTunnel.DialContext(ctx, "tcp", addr)
+	})
+	reloader.setOnRotate(connDialer.CloseAll)
+	return func(ctx context.Context, _, addr string) (net.Conn, error) {
+		return connDialer.DialContext(ctx, "tcp", addr)
 	}, nil
 }
 
@@ -116,6 +125,14 @@ func (r *reloadingTLS) tlsConfig() *tls.Config {
 		cfg.Certificates = []tls.Certificate{*r.cert}
 	}
 	return cfg
+}
+
+// setOnRotate registers a callback invoked when the cert or CA changes after the
+// initial load. It is set after construction so the initial load does not fire it.
+func (r *reloadingTLS) setOnRotate(fn func()) {
+	r.mu.Lock()
+	r.onRotate = fn
+	r.mu.Unlock()
 }
 
 // reloadLocked re-reads the CA and cert/key files. Callers hold r.mu. On a read
