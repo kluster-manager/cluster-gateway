@@ -270,8 +270,11 @@ func (p *proxyHandler) ServeHTTP(_writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	// Resolve the shared cluster-proxy dial holder once and fail closed if it is
-	// unavailable; both the proxied transport and the upgrade transport use it.
+	// Both the proxied transport and the upgrade transport need the shared
+	// cluster-proxy DialHolder pointer (the proxied path injects it as the
+	// transport-cache key, the upgrade path uses its Dial). ClusterProxyDialHolder
+	// is memoized and NewConfigFromCluster already resolved it above, so this
+	// returns the cached holder; the error branch is a defensive fail-closed guard.
 	var dialHolder *transport.DialHolder
 	if cluster.Spec.Access.Endpoint.Type == ClusterEndpointTypeClusterProxy {
 		dialHolder, err = ClusterProxyDialHolder()

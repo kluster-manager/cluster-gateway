@@ -90,18 +90,20 @@ type reloadingTLS struct {
 	caPool    *x509.CertPool
 	caData    []byte
 	cert      *tls.Certificate
-	// onRotate, if set, is invoked (with mu held) when the cert or CA changes
-	// after the initial load — used to drop pooled connections on rotation.
+	// onRotate, if set, is invoked (without r.mu held) when the cert or CA
+	// changes after the initial load — used to drop pooled connections on
+	// rotation.
 	onRotate func()
 }
 
 func newReloadingTLS(caFile, certFile, keyFile, serverName string) (*reloadingTLS, error) {
 	r := &reloadingTLS{caFile: caFile, certFile: certFile, keyFile: keyFile, serverName: serverName}
 	// Load once up front so a misconfiguration fails fast at dialer-build time
-	// rather than on the first proxied request.
+	// rather than on the first proxied request. onRotate is not wired yet, so the
+	// initial load (which "changes" material from nothing) never fires it.
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.reloadLocked(); err != nil {
+	if _, err := r.reloadLocked(); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -111,10 +113,10 @@ func newReloadingTLS(caFile, certFile, keyFile, serverName string) (*reloadingTL
 // certificate, refreshing them from disk if the reload interval has elapsed.
 func (r *reloadingTLS) tlsConfig() *tls.Config {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	rotated := false
 	if time.Since(r.lastCheck) >= clusterProxyTLSReloadInterval {
 		// Best effort: reloadLocked keeps the last good material on error.
-		_ = r.reloadLocked()
+		rotated, _ = r.reloadLocked()
 	}
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -123,6 +125,14 @@ func (r *reloadingTLS) tlsConfig() *tls.Config {
 	}
 	if r.cert != nil {
 		cfg.Certificates = []tls.Certificate{*r.cert}
+	}
+	onRotate := r.onRotate
+	r.mu.Unlock()
+
+	// Drop pooled connections outside the lock so a slow close cannot stall
+	// concurrent dials.
+	if rotated && onRotate != nil {
+		onRotate()
 	}
 	return cfg
 }
@@ -135,62 +145,54 @@ func (r *reloadingTLS) setOnRotate(fn func()) {
 	r.mu.Unlock()
 }
 
-// reloadLocked re-reads the CA and cert/key files. Callers hold r.mu. On a read
-// error it returns the error but leaves the previously loaded material in place
-// (when any) so transient failures do not break dials; the initial load (when
-// nothing is cached yet) surfaces the error to the caller.
-func (r *reloadingTLS) reloadLocked() error {
+// reloadLocked re-reads the CA and cert/key files, updating each independently.
+// Callers hold r.mu. It reports whether the cert or CA content actually changed,
+// so the caller can drop pooled connections after releasing the lock. A read or
+// parse error leaves that component's last good material in place (and does not
+// cache unparseable bytes) so a transient failure — e.g. the brief window while a
+// Kubernetes secret's ..data symlink is swapped — does not break dials; the
+// initial load (nothing cached yet) surfaces the error to the caller.
+func (r *reloadingTLS) reloadLocked() (rotated bool, err error) {
 	r.lastCheck = time.Now()
 
-	caData := r.caData
-	caPool := r.caPool
 	if r.caFile != "" {
-		data, err := os.ReadFile(r.caFile)
-		if err != nil {
+		data, rerr := os.ReadFile(r.caFile)
+		switch {
+		case rerr != nil:
 			if r.caPool == nil {
-				return err
+				return false, rerr
 			}
-			return nil
+			// keep the last good CA
+		case !bytes.Equal(data, r.caData):
+			pool := x509.NewCertPool()
+			if len(data) > 0 && !pool.AppendCertsFromPEM(data) {
+				if r.caPool == nil {
+					return false, errors.Errorf("failed to parse cluster-proxy CA bundle %s", r.caFile)
+				}
+				// keep the last good CA; do not cache the unparseable bytes
+			} else {
+				r.caData = data
+				r.caPool = pool
+				rotated = true
+			}
 		}
-		caData = data
 	}
 
-	var cert *tls.Certificate
 	if r.certFile != "" || r.keyFile != "" {
-		loaded, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
-		if err != nil {
+		loaded, lerr := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+		switch {
+		case lerr != nil:
 			if r.cert == nil {
-				return err
+				return false, lerr
 			}
-			return nil
-		}
-		cert = &loaded
-	}
-
-	caChanged := !bytes.Equal(caData, r.caData)
-	if caChanged {
-		pool := x509.NewCertPool()
-		if len(caData) > 0 && !pool.AppendCertsFromPEM(caData) {
-			if r.caPool == nil {
-				return errors.Errorf("failed to parse cluster-proxy CA bundle %s", r.caFile)
-			}
-			caChanged = false
-		} else {
-			caPool = pool
+			// keep the last good cert
+		case !certsEqual(r.cert, &loaded):
+			r.cert = &loaded
+			rotated = true
 		}
 	}
 
-	certChanged := !certsEqual(r.cert, cert)
-	had := r.caPool != nil || r.cert != nil
-
-	r.caData = caData
-	r.caPool = caPool
-	r.cert = cert
-
-	if had && (caChanged || certChanged) && r.onRotate != nil {
-		r.onRotate()
-	}
-	return nil
+	return rotated, nil
 }
 
 // certsEqual reports whether two client certificates carry the same leaf chain.
